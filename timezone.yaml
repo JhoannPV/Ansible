@@ -1,6 +1,6 @@
 ---
 - name: Configure timezone
-  hosts: all
+  hosts: localhost
   become: true
   tasks:
     - name: Set timezone on Linux
