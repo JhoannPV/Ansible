@@ -1,6 +1,6 @@
 ---
-- name: Deploy project from Git and run with Docker Compose
-  hosts: tools
+- name: Install Docker, clone repo and run docker compose
+  hosts: localhost
   become: yes
   vars:
     project_repo: "https://github.com/JhoannPV/Ansible.git"
@@ -8,6 +8,18 @@
     project_branch: "main"
 
   tasks:
+    - name: Ensure apt cache is updated
+      ansible.builtin.apt:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install Docker if not present
+      ansible.builtin.package:
+        name:
+          - docker.io
+          - docker-compose-plugin
+        state: present
+
     - name: Ensure project directory exists
       ansible.builtin.file:
         path: "{{ project_path }}"
