@@ -23,9 +23,7 @@
         version: "{{ project_branch }}"
         update: yes
         force: yes
-      become: no
-      vars:
-        ansible_become: false
+      become_user: sysadmin
 
     - name: Run docker compose up -d
       community.docker.docker_compose_v2:
