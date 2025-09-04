@@ -1,0 +1,8 @@
+---
+- name: Configure timezone
+  hosts: all
+  become: true
+  tasks:
+    - name: Set timezone on Linux
+      community.general.timezone:
+        name: "America/Bogota"
