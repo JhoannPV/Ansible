@@ -3,7 +3,7 @@
   hosts: localhost
   become: yes
   vars:
-    project_repo: "https://github.com/JhoannPV/Ansible.git"
+    project_repo: "https://github.com/JhoannPV/Stack-DevOps.git"
     project_path: "/home/sysadmin/ansible_project"
     project_branch: "main"
 
