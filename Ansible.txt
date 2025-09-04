@@ -1,0 +1,3 @@
+ansible-playbook -i inventory.ini timezone.yaml
+ansible-playbook -i inventory.ini linux_hostname.yaml
+ansible-galaxy collection install community.general ansible.windows
