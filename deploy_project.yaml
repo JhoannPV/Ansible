@@ -1,0 +1,33 @@
+---
+- name: Deploy project from Git and run with Docker Compose
+  hosts: tools
+  become: yes
+  vars:
+    project_repo: "https://github.com/JhoannPV/Ansible.git"
+    project_path: "/home/sysadmin/ansible_project"
+    project_branch: "main"
+
+  tasks:
+    - name: Ensure project directory exists
+      ansible.builtin.file:
+        path: "{{ project_path }}"
+        state: directory
+        owner: sysadmin
+        group: sysadmin
+        mode: '0755'
+
+    - name: Clone or update the repository
+      ansible.builtin.git:
+        repo: "{{ project_repo }}"
+        dest: "{{ project_path }}"
+        version: "{{ project_branch }}"
+        update: yes
+        force: yes
+      become: no
+      vars:
+        ansible_become: false
+
+    - name: Run docker compose up -d
+      community.docker.docker_compose_v2:
+        project_src: "{{ project_path }}"
+        state: present
