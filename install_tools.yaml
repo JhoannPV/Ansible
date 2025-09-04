@@ -1,0 +1,51 @@
+---
+- name: Install packages and Docker
+  hosts: tools
+  become: yes
+  vars:  
+    ARGOCD_URL: argocd.dev.singularit.co
+
+  tasks:
+
+    - name: Ensure base packages are installed
+      ansible.builtin.apt:
+        name:
+          - curl
+          - ca-certificates
+          - git
+          - python3
+          - python3-pip
+          - python3-venv
+          - python3-pexpect                    
+          - kubernetes-client
+        state: latest
+        update_cache: yes
+
+    - name: Add Docker GPG key
+      ansible.builtin.apt_key:
+        url: https://download.docker.com/linux/debian/gpg
+        keyring: /etc/apt/keyrings/docker.gpg
+        state: present
+
+    - name: Add Docker APT repository
+      ansible.builtin.apt_repository:
+        repo: "deb [arch={{ ansible_architecture }} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian {{ ansible_lsb.codename }} stable"
+        state: present
+        filename: docker
+
+    - name: Ensure Docker CE is installed
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: latest
+        update_cache: yes
+          
+    - name: Add sysadmin to docker group
+      ansible.builtin.user:
+        name: sysadmin
+        groups: docker
+        append: yes
