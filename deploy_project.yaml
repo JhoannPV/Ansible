@@ -13,7 +13,7 @@
         update_cache: yes
       when: ansible_os_family == "Debian"
 
-    - name: Install Docker if not present
+    - name: Install Docker and Compose plugin if not present
       ansible.builtin.package:
         name:
           - docker.io
