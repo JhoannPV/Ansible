@@ -1,2 +1,1 @@
-ansible-playbook -i inventory.ini timezone.yaml linux_hostname.yaml install_tools.yaml deploy_project.yaml
-ansible-galaxy collection install community.general ansible.windows
+ansible-playbook -i inventory.ini timezone.yaml linux_hostname.yaml deploy_project.yaml
