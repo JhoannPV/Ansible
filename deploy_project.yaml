@@ -8,79 +8,20 @@
     project_branch: "main"
 
   tasks:
-    - name: Ensure apt cache is updated
-      ansible.builtin.apt:
-        update_cache: yes
-      when: ansible_os_family == "Debian"
-      
-    # ---------------- Git ----------------
-    - name: Ensure required packages are installed (curl, git)
-      ansible.builtin.package:
-        name:
-          - curl
-          - git
-        state: present
+    - name: Prerequisites
+      ansible.builtin.import_tasks: tasks/prereqs.yml
 
-    # ---------------- Docker CE desde repo oficial ----------------
-    - name: Add Docker's official GPG key and repository
-      ansible.builtin.shell: |
-        install -m 0755 -d /etc/apt/keyrings
-        curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-        chmod a+r /etc/apt/keyrings/docker.asc
-        echo \
-          "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
-          $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | \
-          tee /etc/apt/sources.list.d/docker.list > /dev/null
-        apt update
-      args:
-        creates: /etc/apt/keyrings/docker.asc
-      when: ansible_os_family == "Debian"
+    - name: Docker installation
+      ansible.builtin.import_tasks: tasks/docker.yml
 
-    - name: Install Docker CE
-      ansible.builtin.apt:
-        name:
-          - docker-ce
-          - docker-ce-cli
-          - containerd.io
-          - docker-buildx-plugin
-          - docker-compose-plugin
-        state: present
-      when: ansible_os_family == "Debian"
+    - name: Ensure sysadmin and groups
+      ansible.builtin.import_tasks: tasks/user.yml
 
-    - name: Add sysadmin to docker group
-      ansible.builtin.user:
-        name: sysadmin
-        groups: docker
-        append: yes
-        
-    # ---------------- Usuario sysadmin ----------------
-    - name: Ensure sysadmin user exists
-      ansible.builtin.user:
-        name: sysadmin
-        state: present
-        shell: /bin/bash
-        create_home: yes
+    - name: Project setup
+      ansible.builtin.import_tasks: tasks/project.yml
 
-    # ---------------- Proyecto ----------------
-    - name: Ensure project directory exists
-      ansible.builtin.file:
-        path: "{{ project_path }}"
-        state: directory
-        owner: sysadmin
-        group: sysadmin
-        mode: '0755'
+    - name: Environment variables and .env
+      ansible.builtin.import_tasks: tasks/env.yml
 
-    - name: Clone or update the repository
-      ansible.builtin.git:
-        repo: "{{ project_repo }}"
-        dest: "{{ project_path }}"
-        version: "{{ project_branch }}"
-        update: yes
-        force: yes
-      become_user: sysadmin
-
-    - name: Run docker compose up -d
-      community.docker.docker_compose_v2:
-        project_src: "{{ project_path }}"
-        state: present
-      become_user: sysadmin
+    - name: Docker Compose up
+      ansible.builtin.import_tasks: tasks/compose.yml

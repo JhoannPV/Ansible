@@ -1,0 +1,13 @@
+# Ensure sysadmin user exists and is in docker group
+- name: Ensure sysadmin user exists
+  ansible.builtin.user:
+    name: sysadmin
+    state: present
+    shell: /bin/bash
+    create_home: yes
+
+- name: Add sysadmin to docker group
+  ansible.builtin.user:
+    name: sysadmin
+    groups: docker
+    append: yes

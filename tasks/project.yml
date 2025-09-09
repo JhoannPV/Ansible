@@ -1,0 +1,17 @@
+# Prepare project directory and clone repo
+- name: Ensure project directory exists
+  ansible.builtin.file:
+    path: "{{ project_path }}"
+    state: directory
+    owner: sysadmin
+    group: sysadmin
+    mode: '0755'
+
+- name: Clone or update the repository
+  ansible.builtin.git:
+    repo: "{{ project_repo }}"
+    dest: "{{ project_path }}"
+    version: "{{ project_branch }}"
+    update: yes
+    force: yes
+  become_user: sysadmin
