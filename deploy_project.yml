@@ -3,7 +3,7 @@
   hosts: localhost
   become: yes
   vars:
-    project_repo: "https://jalbertobohorquez2@dev.azure.com/jalbertobohorquez2/calendar/_git/calendar"
+    project_repo: "https://github.com/JhoannPV/Stack-DevOps.git"
     project_path: "/home/sysadmin/ansible_project"
     project_branch: "main"
 
