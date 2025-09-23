@@ -1,15 +1,4 @@
 # Prepare project directory and clone repo
-- name: Check if project directory exists and has content
-  ansible.builtin.stat:
-    path: "{{ project_path }}/.git"
-  register: git_dir
-
-- name: Remove existing project directory if not a git repo
-  ansible.builtin.file:
-    path: "{{ project_path }}"
-    state: absent
-  when: not git_dir.stat.exists
-
 - name: Ensure project directory exists
   ansible.builtin.file:
     path: "{{ project_path }}"
@@ -25,31 +14,4 @@
     version: "{{ project_branch }}"
     update: yes
     force: yes
-    accept_hostkey: yes
   become_user: sysadmin
-  register: git_result
-  ignore_errors: yes
-
-- name: Force clean clone if git update failed
-  block:
-    - name: Remove project directory completely
-      ansible.builtin.file:
-        path: "{{ project_path }}"
-        state: absent
-
-    - name: Recreate project directory
-      ansible.builtin.file:
-        path: "{{ project_path }}"
-        state: directory
-        owner: sysadmin
-        group: sysadmin
-        mode: '0755'
-
-    - name: Fresh clone of the repository
-      ansible.builtin.git:
-        repo: "{{ project_repo }}"
-        dest: "{{ project_path }}"
-        version: "{{ project_branch }}"
-        accept_hostkey: yes
-      become_user: sysadmin
-  when: git_result is failed
