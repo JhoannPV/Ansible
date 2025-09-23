@@ -1,0 +1,37 @@
+# Load env vars, validate and render .env
+- name: Check if vars/env.yml exists
+  ansible.builtin.stat:
+    path: vars/env.yml
+  register: env_file_stat
+
+- name: Load vars from vars/env.yml
+  ansible.builtin.include_vars:
+    file: vars/env.yml
+  when: env_file_stat.stat.exists
+
+- name: Ensure vars/env.yml exists
+  ansible.builtin.assert:
+    that:
+      - env_file_stat.stat.exists
+    fail_msg: "No se encontraron variables. Copia vars/env.yml.template a vars/env.yml y completa los valores."
+    quiet: true
+
+- name: Validate required env vars are present
+  ansible.builtin.assert:
+    that:
+      - AZP_URL is defined and (AZP_URL | length) > 0
+      - AZP_TOKEN is defined and (AZP_TOKEN | length) > 0
+      - AZP_POOL is defined and (AZP_POOL | length) > 0
+      - AZP_AGENT_NAME is defined and (AZP_AGENT_NAME | length) > 0
+    fail_msg: "Faltan variables requeridas para generar .env (AZP_URL, AZP_TOKEN, AZP_POOL, AZP_AGENT_NAME). Completa vars/env.yml"
+    quiet: true
+
+- name: Render .env from template
+  ansible.builtin.template:
+    src: templates/dotenv.j2
+    dest: "{{ project_path }}/.env"
+    owner: sysadmin
+    group: sysadmin
+    mode: '0600'
+  no_log: true
+  become_user: sysadmin

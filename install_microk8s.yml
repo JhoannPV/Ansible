@@ -1,0 +1,59 @@
+---
+- name: Instalar MicroK8s en Ubuntu
+  hosts: all
+  become: yes
+  tasks:
+
+    - name: Crear directorio ~/.kube si no existe
+      ansible.builtin.file:
+        path: "/home/{{ ansible_user_id }}/.kube"
+        state: directory
+        mode: '0755'
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+      when: ansible_user_id != 'root'
+
+    - name: Cambiar propietario de ~/.kube recursivamente
+      ansible.builtin.file:
+        path: "/home/{{ ansible_user_id }}/.kube"
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+        recurse: yes
+      when: ansible_user_id != 'root'
+      
+    - name: Asegurarse de que snapd está instalado
+      ansible.builtin.apt:
+        name: snapd
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Instalar MicroK8s
+      community.general.snap:
+        name: microk8s
+        classic: yes
+        state: present
+
+
+    - name: Agregar usuario actual al grupo microk8s
+      ansible.builtin.user:
+        name: "{{ ansible_user_id }}"
+        groups: microk8s
+        append: yes
+
+    - name: Asegurar que /snap/bin esté en el PATH del usuario actual
+      ansible.builtin.lineinfile:
+        path: "/home/{{ ansible_user_id }}/.profile"
+        regexp: '^export PATH=.*/snap/bin.*'
+        line: 'export PATH="$PATH:/snap/bin"'
+        insertafter: EOF
+      become: false
+      when: ansible_user_id != 'root'
+
+    - name: Habilitar complementos básicos de MicroK8s (opcional)
+      ansible.builtin.command: microk8s enable dns storage
+      register: microk8s_enable
+      changed_when: "'Nothing to do for' not in microk8s_enable.stdout"
+      failed_when: false
+      become: yes
+      become_user: root

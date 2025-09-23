@@ -1,0 +1,29 @@
+---
+- name: Install Docker, Git, clone repo and run docker compose
+  hosts: localhost
+  become: yes
+  vars_files:
+    - vars/env.yml
+  vars:
+    project_repo: "https://github.com/JhoannPV/azp-agent-in-docker.git"
+    project_path: "/home/sysadmin/agent_project"
+    project_branch: "main"
+
+  tasks:
+    - name: Prerequisites
+      ansible.builtin.import_tasks: tasks/prereqs.yml
+
+    - name: Docker installation
+      ansible.builtin.import_tasks: tasks/docker.yml
+
+    - name: Ensure sysadmin and groups
+      ansible.builtin.import_tasks: tasks/user.yml
+
+    - name: Project setup
+      ansible.builtin.import_tasks: tasks/project.yml
+
+    - name: Environment variables and .env
+      ansible.builtin.import_tasks: tasks/env.yml
+
+    - name: Docker Compose up
+      ansible.builtin.import_tasks: tasks/compose.yml
