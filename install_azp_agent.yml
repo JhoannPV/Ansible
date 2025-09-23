@@ -1,0 +1,187 @@
+---
+- name: Install and configure Azure Pipelines agent (Linux)
+  hosts: localhost
+  become: yes
+  gather_facts: yes
+  vars_files:
+    - vars/env.yml
+
+  vars:
+    azp_agent_download_url: "https://download.agent.dev.azure.com/agent/4.261.0/vsts-agent-linux-x64-4.261.0.tar.gz"
+    # Derive filename automatically from URL
+    azp_agent_filename: "{{ azp_agent_download_url | split('/') | last }}"
+    # Where to place downloaded tarballs on the target host
+    azp_download_dir: "/tmp/azp-agent"
+    # Final tarball path used by unarchive (may be overridden by local artifact if present)
+    azp_agent_tarball: "{{ azp_download_dir }}/{{ azp_agent_filename }}"
+
+  pre_tasks:
+    - name: Validate required variables are provided
+      ansible.builtin.assert:
+        that:
+          - AZP_URL is string and AZP_URL != ''
+          - AZP_TOKEN is string and AZP_TOKEN != ''
+          - AZP_POOL is string and AZP_POOL != ''
+          - AZP_AGENT_NAME is string and AZP_AGENT_NAME != ''
+        fail_msg: "AZP_URL, AZP_TOKEN, AZP_POOL, and AZP_AGENT_NAME are required. Define them in vars/azp.yml or pass as --extra-vars."
+
+    - name: Ensure download directory exists
+      ansible.builtin.file:
+        path: "{{ azp_download_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Check if agent tarball exists in repo root (local artifact fallback)
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/{{ azp_agent_filename }}"
+      register: azp_local_artifact
+
+    - name: Use local artifact if present
+      ansible.builtin.set_fact:
+        azp_agent_tarball: "{{ playbook_dir }}/{{ azp_agent_filename }}"
+      when: azp_local_artifact.stat.exists | default(false)
+
+    - name: Download Azure Pipelines agent from official source
+      ansible.builtin.get_url:
+        url: "{{ azp_agent_download_url }}"
+        dest: "{{ azp_download_dir }}/{{ azp_agent_filename }}"
+        mode: '0644'
+        checksum: "{{ azp_agent_checksum | default(omit) }}"
+        force: false
+        validate_certs: true
+      when: not (azp_local_artifact.stat.exists | default(false))
+      register: azp_download_result
+
+  tasks:
+    - name: Ensure agent base directory exists
+      ansible.builtin.file:
+        path: "{{ agent_dir }}"
+        state: directory
+        owner: "{{ agent_user }}"
+        group: "{{ agent_user }}"
+        mode: '0755'
+
+    - name: Unarchive Azure Pipelines agent from local artifact
+      ansible.builtin.unarchive:
+        src: "{{ azp_agent_tarball }}"
+        dest: "{{ agent_dir }}"
+        remote_src: yes
+        creates: "{{ agent_dir }}/config.sh"
+      register: unarchive_result
+
+    - name: Fix ownership after unarchive
+      ansible.builtin.file:
+        path: "{{ agent_dir }}"
+        state: directory
+        owner: "{{ agent_user }}"
+        group: "{{ agent_user }}"
+        recurse: yes
+
+    - name: Stop and uninstall existing service (if present)
+      ansible.builtin.shell: |
+        set -e
+        if [ -x ./svc.sh ]; then
+          ./svc.sh stop || true
+          ./svc.sh uninstall || true
+        fi
+        if [ -x ./config.sh ]; then
+          ./config.sh remove --unattended || true
+        fi
+      args:
+        chdir: "{{ agent_dir }}"
+      when: agent_replace | bool
+      become_user: "{{ agent_user }}"
+      changed_when: true
+
+    - name: Install OS dependencies via helper script (if available)
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if [ -x ./bin/installdependencies.sh ]; then
+          ./bin/installdependencies.sh
+        fi
+      args:
+        chdir: "{{ agent_dir }}"
+      changed_when: false
+      become: yes
+      failed_when: false
+      ignore_errors: yes
+
+    - name: Ensure base packages for Debian family (fallback)
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - git
+          - jq
+          - tar
+          - unzip
+          - libkrb5-3
+          - zlib1g
+          - libunwind8
+          - libnuma1
+          - liblttng-ust1t64
+          - libicu-dev
+          - libssl-dev
+          - libcurl4t64
+          - libcurl4
+        state: present
+        update_cache: yes
+      when: ansible_os_family == 'Debian'
+      ignore_errors: yes
+
+    - name: Configure agent (unattended)
+      ansible.builtin.shell: |
+        set -euo pipefail
+        ./config.sh \
+          --unattended \
+          --url "{{ AZP_URL }}" \
+          --auth pat \
+          --token "{{ AZP_TOKEN }}" \
+          --pool "{{ AZP_POOL }}" \
+          --agent "{{ AZP_AGENT_NAME }}" \
+          --work "{{ agent_work_dir }}" \
+          --acceptTeeEula \
+          --replace
+      args:
+        chdir: "{{ agent_dir }}"
+        creates: "{{ agent_dir }}/.agent"
+      become_user: "{{ agent_user }}"
+      environment: "{{ {'AGENT_ALLOW_RUNASROOT': '1'} if agent_user == 'root' else {} }}"
+
+    - name: Uninstall systemd service if already exists
+      ansible.builtin.shell: |
+        set -e
+        if [ -x ./svc.sh ]; then
+          ./svc.sh stop || true
+          ./svc.sh uninstall || true
+        fi
+      args:
+        chdir: "{{ agent_dir }}"
+      when: agent_as_service | bool
+      become: yes
+      environment: "{{ {'AGENT_ALLOW_RUNASROOT': '1'} if agent_user == 'root' else {} }}"
+      ignore_errors: yes
+
+    - name: Install and start as systemd service
+      ansible.builtin.shell: |
+        set -e
+        ./svc.sh install
+        ./svc.sh start
+      args:
+        chdir: "{{ agent_dir }}"
+      when: agent_as_service | bool
+      become: yes
+      environment: "{{ {'AGENT_ALLOW_RUNASROOT': '1'} if agent_user == 'root' else {} }}"
+      failed_when: false
+      ignore_errors: yes
+
+    - name: Start agent in foreground (run.sh) - optional
+      ansible.builtin.shell: ./run.sh
+      args:
+        chdir: "{{ agent_dir }}"
+      async: 30
+      poll: 0
+      when: not agent_as_service | bool
+      become_user: "{{ agent_user }}"
+      environment: "{{ {'AGENT_ALLOW_RUNASROOT': '1'} if agent_user == 'root' else {} }}"
+
