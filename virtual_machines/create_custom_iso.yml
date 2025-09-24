@@ -1,0 +1,292 @@
+---
+- name: Create Custom Debian 13.1.0 ISO with Preseed
+  hosts: localhost
+  become: yes
+  vars_files:
+    - ../task_virtual_machines/env.yml
+  vars:
+    # Variables automáticas desde el archivo de configuración
+    vm_base_directory: "{{ vm_base_directory_default }}"
+    iso_base_dir: "{{ vm_iso_base_default }}"
+    debian_version: "13.1.0"
+    debian_iso_url: "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-{{ debian_version }}-amd64-netinst.iso"
+    src_iso: "{{ iso_base_dir }}/debian-{{ debian_version }}-amd64-netinst.iso"
+    custom_iso: "{{ iso_base_dir }}/debian-{{ debian_version }}-amd64-netinst-custom.iso"
+    vm_iso_location: "{{ custom_iso }}"
+    mount_dir: "{{ iso_base_dir }}/debian-iso"
+    work_dir: "{{ iso_base_dir }}/debian-iso-work"
+
+  tasks:
+    - name: Validate configuration
+      ansible.builtin.fail:
+        msg: "Error: No se pudieron determinar las rutas de configuración"
+      when: vm_base_directory == "" or iso_base_dir == ""
+
+    - name: Display environment configuration
+      ansible.builtin.debug:
+        msg:
+          - "=== Configuración desde Variables de Entorno ==="
+          - "VM_BASE_DIR: {{ vm_base_directory }}"
+          - "VM_ISO_BASE: {{ iso_base_dir }}"
+          - "ISO Custom: {{ iso_base_dir }}/debian-{{ debian_version }}-amd64-netinst-custom.iso"
+          - "=============================================="
+
+    - name: Install required packages
+      ansible.builtin.package:
+        name:
+          - xorriso
+          - isolinux
+          - syslinux-utils
+          - rsync
+          - whois
+          - wget
+          - curl
+        state: present
+
+    - name: Create complete directory structure for VMs and ISO
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+      loop:
+        - "{{ vm_base_directory }}"
+        - "{{ iso_base_dir }}"
+        - "{{ mount_dir }}"
+        - "{{ work_dir }}"
+
+    - name: Check if original ISO exists
+      ansible.builtin.stat:
+        path: "{{ src_iso }}"
+      register: iso_exists
+
+    - name: Download Debian 13.1.0 ISO if not exists
+      ansible.builtin.get_url:
+        url: "{{ debian_iso_url }}"
+        dest: "{{ src_iso }}"
+        mode: '0644'
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+      when: not iso_exists.stat.exists
+
+    - name: Mount original ISO
+      ansible.posix.mount:
+        path: "{{ mount_dir }}"
+        src: "{{ src_iso }}"
+        fstype: iso9660
+        opts: loop,ro
+        state: mounted
+
+    - name: Copy ISO contents to working directory
+      ansible.builtin.command:
+        cmd: rsync -a --delete "{{ mount_dir }}/" "{{ work_dir }}/"
+      changed_when: true
+
+    - name: Create preseed.cfg file
+      ansible.builtin.copy:
+        dest: "{{ work_dir }}/preseed.cfg"
+        mode: '0644'
+        content: |
+          ### =====================================================================
+          ### Debian Preseed - Unattended (Bookworm 12.x / Trixie 13.x)
+          ### =====================================================================
+          
+          # Early localization (avoid initial dialogs)
+          d-i debconf/priority string critical
+          d-i debian-installer/language string en
+          d-i debian-installer/country string CO
+          d-i debian-installer/locale string en_US.UTF-8
+          
+          # Keyboard (US)
+          d-i keyboard-configuration/ask_detect boolean false
+          d-i keyboard-configuration/layoutcode string us
+          d-i keyboard-configuration/modelcode string pc105
+          
+          # Network
+          d-i netcfg/choose_interface select auto
+          d-i netcfg/link_wait_timeout string 3
+          d-i netcfg/dhcp_timeout string 10
+          d-i netcfg/get_hostname string vm-debian
+          d-i netcfg/hostname string vm-debian
+          d-i netcfg/get_domain string local
+          d-i base-installer/install-recommends boolean false
+          
+          # User
+          d-i passwd/make-user boolean true
+          d-i passwd/root-login boolean false
+          d-i passwd/user-uid string 1000
+          d-i passwd/username string sysadmin
+          # SHA-512 hash for password: admin123
+          d-i passwd/user-password-crypted password $6$mOVKPpiDXNRZd/gH$o460/niXr72jzlr6pHtchtEJYiSQ4OPefm9EAD5NznNZiX.WV/63YRrMubnEJ0g0XWO7qJWxrYIaHxy6KYtN20
+          d-i passwd/user-fullname string System Administrator
+          d-i passwd/user-default-groups string audio cdrom video sudo
+          
+          # Mirror
+          d-i mirror/country string manual
+          d-i mirror/http/hostname string deb.debian.org
+          d-i mirror/http/directory string /debian
+          d-i mirror/http/proxy string
+          
+          # Popularity contest
+          d-i popularity-contest/participate boolean false
+          
+          # Apt setup
+          d-i apt-setup/contrib boolean true
+          d-i apt-setup/non-free boolean true
+          d-i apt-setup/non-free-firmware boolean true
+          d-i apt-setup/enable-source-repositories boolean false
+          d-i apt-setup/services-select multiselect security, updates
+          d-i apt-setup/security_host string security.debian.org
+          d-i apt-setup/security_path string /debian-security
+          d-i apt-setup/security_protocol string https
+          d-i apt-setup/cdrom/set-first boolean false
+          d-i apt-setup/disable-cdrom-entries boolean true
+          
+          # Clock / timezone
+          d-i clock-setup/utc boolean true
+          d-i time/zone string America/Bogota
+          d-i clock-setup/ntp boolean true
+          d-i clock-setup/ntp-server string pool.ntp.org
+          
+          # Partitioning (guided LVM)
+          d-i partman-auto/method string lvm
+          d-i partman-auto-lvm/guided_size string max
+          d-i partman-lvm/device_remove_lvm boolean true
+          d-i partman-lvm/confirm boolean true
+          d-i partman-lvm/confirm_nooverwrite boolean true
+          d-i partman-md/device_remove_md boolean true
+          d-i partman-auto/choose_recipe select atomic
+          d-i partman/confirm_write_new_label boolean true
+          d-i partman-partitioning/confirm_write_new_label boolean true
+          d-i partman/choose_partition select finish
+          d-i partman/confirm boolean true
+          d-i partman/confirm_nooverwrite boolean true
+          
+          # Base system
+          d-i base-installer/kernel/image select linux-image-amd64
+          d-i base-installer/initramfs-tools/driver-policy select dep
+          
+          # Packages
+          d-i pkgsel/upgrade select full-upgrade
+          tasksel tasksel/first multiselect standard, ssh-server
+          
+          # GRUB
+          d-i grub-installer/only_debian boolean true
+          d-i grub-installer/force-efi-extra-removable boolean true
+          d-i grub-installer/bootdev string default
+          
+          # Keep consoles
+          d-i finish-install/keep-consoles boolean true
+          
+          # Late command (robust, doesn't fail if files are missing)
+          d-i preseed/late_command string \
+            in-target mkdir -p /home/sysadmin/.ssh ; \
+            echo 'sysadmin ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/sysadmin ; \
+            chmod 0440 /target/etc/sudoers.d/sysadmin ; \
+            in-target systemctl enable ssh ;
+          
+          # Eject and reboot
+          d-i cdrom-detect/eject boolean true
+          d-i finish-install/reboot_in_progress note
+
+    - name: Configure BIOS boot (ISOLINUX)
+      ansible.builtin.copy:
+        dest: "{{ work_dir }}/isolinux/isolinux.cfg"
+        mode: '0644'
+        content: |
+          # D-I config version 2.0
+          PROMPT 0
+          DEFAULT install
+          ONTIMEOUT install
+          TIMEOUT 10
+          
+          INCLUDE txt.cfg
+
+    - name: Configure ISOLINUX menu
+      ansible.builtin.copy:
+        dest: "{{ work_dir }}/isolinux/txt.cfg"
+        mode: '0644'
+        content: |
+          default install
+          
+          label install
+              menu label ^Install
+              menu default
+              kernel /install.amd/vmlinuz
+              append auto=true priority=critical file=/cdrom/preseed.cfg preseed/file=/cdrom/preseed.cfg preseed/locale=en_US.UTF-8 locale=en_US.UTF-8 language=en country=CO console-setup/ask_detect=false keyboard-configuration/ask_detect=false keyboard-configuration/xkb-keymap=us keyboard-configuration/layoutcode=us initrd=/install.amd/initrd.gz --- quiet
+          
+          label installgui
+              menu label ^Graphical install
+              kernel /install.amd/vmlinuz
+              append auto=true priority=critical file=/cdrom/preseed.cfg preseed/file=/cdrom/preseed.cfg preseed/locale=en_US.UTF-8 locale=en_US.UTF-8 language=en country=CO console-setup/ask_detect=false keyboard-configuration/ask_detect=false keyboard-configuration/xkb-keymap=us keyboard-configuration/layoutcode=us initrd=/install.amd/gtk/initrd.gz --- quiet
+
+    - name: Configure UEFI boot (GRUB)
+      ansible.builtin.copy:
+        dest: "{{ work_dir }}/boot/grub/grub.cfg"
+        mode: '0644'
+        content: |
+          set default="0"
+          set timeout=1
+          
+          menuentry 'Install' {
+          linux /install.amd/vmlinuz auto=true priority=critical file=/cdrom/preseed.cfg preseed/file=/cdrom/preseed.cfg locale=en_US.UTF-8 language=en country=CO keyboard-configuration/ask_detect=false keyboard-configuration/layoutcode=us --- quiet
+          initrd /install.amd/initrd.gz
+          }
+          
+          menuentry 'Graphical install' {
+          linux /install.amd/vmlinuz auto=true priority=critical file=/cdrom/preseed.cfg preseed/file=/cdrom/preseed.cfg locale=en_US.UTF-8 language=en country=CO keyboard-configuration/ask_detect=false keyboard-configuration/layoutcode=us --- quiet
+          initrd /install.amd/gtk/initrd.gz
+          }
+
+    - name: Embed preseed into initrd
+      ansible.builtin.shell: |
+        cd "{{ work_dir }}/install.amd"
+        mkdir -p initrd-edit && cd initrd-edit
+        gunzip -c ../initrd.gz | cpio -id
+        cp "{{ work_dir }}/preseed.cfg" ./preseed.cfg
+        find . | cpio -o -H newc | gzip -9 > ../initrd.gz
+        cd .. && rm -rf initrd-edit
+      changed_when: true
+
+    - name: Build custom ISO
+      ansible.builtin.shell: |
+        xorriso -as mkisofs \
+          -o "{{ custom_iso }}" \
+          -r -iso-level 3 -V "DEBIAN_CUSTOM" \
+          -no-emul-boot -boot-load-size 4 -boot-info-table \
+          -b isolinux/isolinux.bin -c isolinux/boot.cat \
+          -eltorito-alt-boot -e boot/grub/efi.img -no-emul-boot \
+          -isohybrid-gpt-basdat -isohybrid-apm-hfsplus \
+          -input-charset utf-8 \
+          "{{ work_dir }}"
+      changed_when: true
+
+    - name: Unmount original ISO
+      ansible.posix.mount:
+        path: "{{ mount_dir }}"
+        state: unmounted
+
+    - name: Set ownership of custom ISO
+      ansible.builtin.file:
+        path: "{{ custom_iso }}"
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+        mode: '0644'
+
+    - name: Set VM environment variables for next playbooks
+      ansible.builtin.set_fact:
+        vm_base_directory: "{{ vm_base_directory }}"
+        vm_iso_location: "{{ vm_iso_location }}"
+      delegate_to: localhost
+      delegate_facts: true
+
+    - name: Display completion message
+      ansible.builtin.debug:
+        msg: 
+          - "Custom Debian ISO created successfully!"
+          - "Location: {{ custom_iso }}"
+          - "VM Base Directory: {{ vm_base_directory }}"
+          - "Variables configured automatically for VM creation"
+          - "Default user: sysadmin"
+          - "Default password: admin123"

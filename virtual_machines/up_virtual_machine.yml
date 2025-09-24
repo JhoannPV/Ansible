@@ -1,0 +1,104 @@
+---
+- name: Create Multiple Virtual Machines
+  hosts: localhost
+  become: no
+  vars_files:
+    - ../task_virtual_machines/env.yml
+  vars:
+    # Variables automáticas desde el archivo de configuración
+    vm_base_directory: "{{ vm_base_directory_default }}"
+    vm_iso_location: "{{ vm_iso_base_default }}/debian-13.1.0-amd64-netinst-custom.iso"
+  vars_files:
+    - ../task_virtual_machines/env.yml
+
+  pre_tasks:
+    - name: Validate configuration
+      ansible.builtin.fail:
+        msg: "Error: No se pudieron determinar las rutas de configuración"
+      when: vm_base_directory == "" or vm_iso_location == ""
+
+    - name: Display environment configuration
+      ansible.builtin.debug:
+        msg:
+          - "=== Configuración desde Variables de Entorno ==="
+          - "VM Base Directory: {{ vm_base_directory }}"
+          - "ISO Location: {{ vm_iso_location }}"
+          - "============================================="
+
+    - name: Check if VirtualBox is installed
+      ansible.builtin.command: which VBoxManage
+      register: vbox_check
+      failed_when: false
+      changed_when: false
+
+    - name: Install VirtualBox if not present
+      ansible.builtin.package:
+        name: virtualbox
+        state: present
+      become: yes
+      when: vbox_check.rc != 0
+
+    - name: Add user to vboxusers group
+      ansible.builtin.user:
+        name: "{{ ansible_user_id }}"
+        groups: vboxusers
+        append: yes
+      become: yes
+
+    - name: Check if custom ISO exists
+      ansible.builtin.stat:
+        path: "{{ vm_iso_path }}"
+      register: iso_exists
+
+    - name: Fail if custom ISO doesn't exist
+      ansible.builtin.fail:
+        msg: |
+          Custom ISO not found at: {{ vm_iso_path }}
+          Please run the create_custom_iso.yml playbook first:
+          ansible-playbook -i inventory.ini create_custom_iso.yml
+      when: not iso_exists.stat.exists
+
+    - name: Display VM creation plan
+      ansible.builtin.debug:
+        msg:
+          - "Planning to create {{ virtual_machines | length }} virtual machines:"
+          - "{% for vm in virtual_machines %}{{ loop.index }}. {{ vm.name }} ({{ vm.memory }}MB RAM, {{ vm.disk_size }}MB disk, {{ vm.cpu_count }} CPUs){% endfor %}"
+          - "Base directory: {{ vm_base_directory }}"
+          - "ISO path: {{ vm_iso_path }}"
+
+    - name: Create base VM directory
+      ansible.builtin.file:
+        path: "{{ vm_base_directory }}"
+        state: directory
+        mode: '0755'
+
+  tasks:
+    - name: Create virtual machines
+      ansible.builtin.include_tasks: ../task_virtual_machines/create_vm.yml
+      vars:
+        vm: "{{ item }}"
+      loop: "{{ virtual_machines }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+  post_tasks:
+    - name: List all created VMs
+      ansible.builtin.shell: VBoxManage list vms
+      register: vm_list
+      changed_when: false
+
+    - name: Display created VMs
+      ansible.builtin.debug:
+        msg: 
+          - "All virtual machines created successfully!"
+          - "Available VMs:"
+          - "{{ vm_list.stdout_lines }}"
+          - ""
+          - "To start a VM, use:"
+          - "VBoxManage startvm 'VM_NAME' --type headless"
+          - "or"
+          - "VBoxManage startvm 'VM_NAME' --type gui"
+          - ""
+          - "Default credentials for VMs:"
+          - "Username: sysadmin"
+          - "Password: admin123"

@@ -1,0 +1,70 @@
+---
+# Playbook de inicio - configuración automática de variables
+- name: Setup Automatic VM Environment Configuration  
+  hosts: localhost
+  gather_facts: yes
+  vars_files:
+    - task_virtual_machines/env.yml
+  vars:
+    # Variables automáticas usando valores por defecto del archivo de configuración
+    vm_base_directory: "{{ vm_base_directory_default }}"
+    iso_base_directory: "{{ vm_iso_base_default }}"
+    vm_iso_location: "{{ vm_iso_base_default }}/debian-13.1.0-amd64-netinst-custom.iso"
+
+  tasks:
+    - name: Display automation plan
+      ansible.builtin.debug:
+        msg:
+          - "=== Automatización Completa de Máquinas Virtuales ==="
+          - "Este playbook ejecutará los siguientes pasos:"
+          - "1. ✅ Variables de entorno configuradas automáticamente"
+          - "2. Crear estructura de directorios automáticamente"
+          - "3. Crear ISO personalizada de Debian 13.1.0 (si no existe)"
+          - "4. Configurar VirtualBox"
+          - "5. Crear todas las VMs definidas en task_virtual_machines/env.yml"
+          - ""
+          - "Variables configuradas automáticamente desde env.yml:"
+          - "- VM Base Directory: {{ vm_base_directory }}"
+          - "- ISO Base Directory: {{ iso_base_directory }}"
+          - "- ISO Location: {{ vm_iso_location }}"
+          - ""
+          - "🎯 NO necesitas exportar variables manualmente"
+          - "==========================================================="
+
+# Paso 1: Crear ISO personalizada
+- import_playbook: virtual_machines/create_custom_iso.yml
+
+# Paso 2: Crear máquinas virtuales  
+- import_playbook: virtual_machines/up_virtual_machine.yml
+
+# Playbook final - muestra resumen de finalización
+- name: Display Final Summary
+  hosts: localhost
+  gather_facts: no
+  vars_files:
+    - task_virtual_machines/env.yml
+  vars:
+    vm_base_directory: "{{ vm_base_directory_default }}"
+    iso_base_directory: "{{ vm_iso_base_default }}"
+
+  tasks:
+    - name: Display final summary
+      ansible.builtin.debug:
+        msg:
+          - "=== AUTOMATIZACIÓN COMPLETADA ==="
+          - "✅ Variables de entorno configuradas automáticamente"
+          - "✅ ISO personalizada creada en: {{ iso_base_directory }}"
+          - "✅ VirtualBox configurado"
+          - "✅ Máquinas virtuales creadas en: {{ vm_base_directory }}"
+          - ""
+          - "Para gestionar las VMs:"
+          - "- Listar VMs: VBoxManage list vms"
+          - "- Iniciar VM: VBoxManage startvm 'NOMBRE-VM' --type headless"
+          - "- Detener VM: VBoxManage controlvm 'NOMBRE-VM' poweroff"
+          - ""
+          - "Credenciales por defecto:"
+          - "- Usuario: sysadmin"
+          - "- Contraseña: admin123"
+          - ""
+          - "Configuración completamente automática - Sin intervención manual"
+          - "==============================="

@@ -1,0 +1,115 @@
+# Tareas para crear una máquina virtual en VirtualBox
+- name: "Check if VM '{{ vm.name }}' already exists"
+  ansible.builtin.shell: |
+    VBoxManage list vms | grep -q "\"{{ vm.name }}\""
+  register: vm_exists
+  failed_when: false
+  changed_when: false
+
+- name: "Remove existing VM '{{ vm.name }}' if it exists"
+  ansible.builtin.shell: |
+    VBoxManage unregistervm "{{ vm.name }}" --delete
+  when: vm_exists.rc == 0
+  ignore_errors: true
+
+- name: "Create VM directory for '{{ vm.name }}'"
+  ansible.builtin.file:
+    path: "{{ vm_base_directory }}/{{ vm.name }}"
+    state: directory
+    mode: '0755'
+    owner: "{{ ansible_user_id }}"
+    group: "{{ ansible_user_id }}"
+  become: yes
+
+- name: "Create VM '{{ vm.name }}'"
+  ansible.builtin.shell: |
+    VBoxManage createvm \
+      --name "{{ vm.name }}" \
+      --ostype "{{ default_vm_config.os_type }}" \
+      --basefolder "{{ vm_base_directory }}" \
+      --register
+
+- name: "Detect available network adapters"
+  ansible.builtin.shell: |
+    ip route | grep default | awk '{print $5}' | head -1
+  register: default_adapter
+  when: vm.network == "bridged"
+
+- name: "Configure VM '{{ vm.name }}' basic settings"
+  ansible.builtin.shell: |
+    VBoxManage modifyvm "{{ vm.name }}" \
+      --memory {{ vm.memory }} \
+      --cpus {{ vm.cpu_count }} \
+      --vram {{ default_vm_config.video_memory }} \
+      --audio-driver {{ default_vm_config.audio }} \
+      --nic1 {{ vm.network.lower() }} \
+      --nic-type1 {{ default_vm_config.network_adapter_type }} \
+      --accelerate-3d {{ 'on' if default_vm_config.acceleration_3d else 'off' }}
+
+- name: "Configure bridged network adapter for VM '{{ vm.name }}'"
+  ansible.builtin.shell: |
+    VBoxManage modifyvm "{{ vm.name }}" \
+      --bridgeadapter1 {{ default_adapter.stdout }}
+  when: vm.network == "bridged" and default_adapter.stdout != ""
+
+- name: "Create disk for VM '{{ vm.name }}'"
+  ansible.builtin.shell: |
+    VBoxManage createmedium disk \
+      --filename "{{ vm_base_directory }}/{{ vm.name }}/{{ vm.name }}.vdi" \
+      --size {{ vm.disk_size }} \
+      --format VDI
+
+- name: "Create SATA controller for VM '{{ vm.name }}'"
+  ansible.builtin.shell: |
+    VBoxManage storagectl "{{ vm.name }}" \
+      --name "SATA Controller" \
+      --add sata \
+      --controller IntelAhci \
+      --portcount 2
+
+- name: "Attach disk to VM '{{ vm.name }}'"
+  ansible.builtin.shell: |
+    VBoxManage storageattach "{{ vm.name }}" \
+      --storagectl "SATA Controller" \
+      --port 0 \
+      --device 0 \
+      --type hdd \
+      --medium "{{ vm_base_directory }}/{{ vm.name }}/{{ vm.name }}.vdi"
+
+- name: "Create IDE controller for VM '{{ vm.name }}'"
+  ansible.builtin.shell: |
+    VBoxManage storagectl "{{ vm.name }}" \
+      --name "IDE Controller" \
+      --add ide
+
+- name: "Attach ISO to VM '{{ vm.name }}'"
+  ansible.builtin.shell: |
+    VBoxManage storageattach "{{ vm.name }}" \
+      --storagectl "IDE Controller" \
+      --port 0 \
+      --device 0 \
+      --type dvddrive \
+      --medium "{{ vm_iso_path }}"
+
+- name: "Configure boot order for VM '{{ vm.name }}'"
+  ansible.builtin.shell: |
+    VBoxManage modifyvm "{{ vm.name }}" \
+      --boot1 {{ vm.boot_order[0] }} \
+      --boot2 {{ vm.boot_order[1] }} \
+      --boot3 none \
+      --boot4 none
+
+- name: "Enable USB for VM '{{ vm.name }}'"
+  ansible.builtin.shell: |
+    VBoxManage modifyvm "{{ vm.name }}" \
+      --usbehci {{ default_vm_config.usb | lower }}
+  when: default_vm_config.usb
+
+- name: "Display VM '{{ vm.name }}' information"
+  ansible.builtin.debug:
+    msg:
+      - "VM '{{ vm.name }}' created successfully!"
+      - "Memory: {{ vm.memory }}MB"
+      - "Disk: {{ vm.disk_size }}MB"
+      - "CPUs: {{ vm.cpu_count }}"
+      - "Location: {{ vm_base_directory }}/{{ vm.name }}"

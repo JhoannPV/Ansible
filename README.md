@@ -1,6 +1,6 @@
 # Ansible DevOps Automation Collection
 
-Este repositorio contiene una colección de playbooks de Ansible para automatizar el despliegue de infraestructura DevOps, incluyendo aplicaciones dockerizadas, agentes de Azure Pipelines, y clusters de MicroK8s.
+Este repositorio contiene una colección de playbooks de Ansible para automatizar el despliegue de infraestructura DevOps, incluyendo aplicaciones dockerizadas, agentes de Azure Pipelines, clusters de MicroK8s y automatización completa de máquinas virtuales.
 
 ## 📋 Funcionalidades
 
@@ -8,32 +8,40 @@ Este repositorio contiene una colección de playbooks de Ansible para automatiza
 - **🔧 Configuración de agentes Azure Pipelines**: Instala y configura agentes de build para Azure DevOps
 - **☸️ Instalación de MicroK8s**: Despliega clusters de Kubernetes ligeros para desarrollo
 - **🐳 Agentes Docker**: Levanta agentes de Azure Pipelines en contenedores Docker
+- **💻 Automatización de VMs**: Crea automáticamente máquinas virtuales con Debian 13.1.0, red puente y configuración desatendida
 - **⚙️ Configuración del sistema**: Gestiona usuarios, grupos, configuración de zona horaria y hostname
 
 ## 📁 Estructura del Proyecto
 
 ```
 Ansible/
-├── deploy_project.yml       # Despliega Stack-DevOps (MongoDB + Node.js + React)
-├── install_azp_agent.yml    # Instala agente nativo de Azure Pipelines
-├── install_microk8s.yml     # Instala y configura MicroK8s
-├── up_agent_docker.yml      # Levanta agente de Azure Pipelines en Docker
-├── linux_hostname.yml       # Configura hostname del sistema
-├── timezone.yml            # Configura zona horaria
-├── inventory.ini           # Inventario de hosts de Ansible
-├── tasks/                  # Tareas modulares reutilizables
-│   ├── compose.yml         # Ejecuta docker-compose
-│   ├── docker.yml          # Instala Docker CE
-│   ├── env.yml             # Maneja variables de entorno
-│   ├── env_agent_docker.yml # Variables para agente Docker
-│   ├── prereqs.yml         # Instala prerequisitos del sistema
-│   ├── project.yml         # Clona y configura proyecto
-│   └── user.yml           # Gestiona usuarios y grupos
+├── deploy_project.yml          # Despliega Stack-DevOps (MongoDB + Node.js + React)
+├── install_azp_agent.yml       # Instala agente nativo de Azure Pipelines
+├── install_microk8s.yml        # Instala y configura MicroK8s
+├── up_agent_docker.yml         # Levanta agente de Azure Pipelines en Docker
+├── linux_hostname.yml          # Configura hostname del sistema
+├── timezone.yml               # Configura zona horaria
+├── vm_automation_master.yml    # 🆕 Automatización completa de máquinas virtuales
+├── inventory.ini              # Inventario de hosts de Ansible
+├── tasks/                     # Tareas modulares reutilizables
+│   ├── compose.yml            # Ejecuta docker-compose
+│   ├── docker.yml             # Instala Docker CE
+│   ├── env.yml                # Maneja variables de entorno
+│   ├── env_agent_docker.yml   # Variables para agente Docker
+│   ├── prereqs.yml            # Instala prerequisitos del sistema
+│   ├── project.yml            # Clona y configura proyecto
+│   └── user.yml              # Gestiona usuarios y grupos
+├── virtual_machines/          # 🆕 Sistema de automatización de VMs
+│   ├── create_custom_iso.yml  # Crea ISO personalizada de Debian 13.1.0
+│   └── up_virtual_machine.yml # Crea y configura máquinas virtuales
+├── task_virtual_machines/     # 🆕 Configuración y tareas de VMs
+│   ├── env.yml               # Configuración de VMs y rutas por defecto
+│   └── create_vm.yml         # Tareas individuales de creación de VM
 ├── templates/
-│   └── dotenv.j2          # Template para archivos .env
+│   └── dotenv.j2             # Template para archivos .env
 └── vars/
-    ├── env.yml            # Variables de entorno (generado desde template)
-    └── env.yml.template   # Template de configuración
+    ├── env.yml               # Variables de entorno (generado desde template)
+    └── env.yml.template      # Template de configuración
 ```
 
 ## 🛠️ Prerequisitos
@@ -62,6 +70,18 @@ Copia el template y configura las variables necesarias:
 
 ```bash
 cp vars/env.yml.template vars/env.yml
+```
+
+### 2. Configuración de VMs (Para automatización de máquinas virtuales)
+Las variables de VMs se configuran automáticamente desde `task_virtual_machines/env.yml`:
+
+```bash
+# Las rutas por defecto son:
+# - Directorio base VMs: /media/jhoann-bohorquez/JABP/VirtualBox VMs
+# - Directorio ISOs: /home/jhoann-bohorquez/vm/iso
+
+# Para personalizar las rutas, editar:
+nano task_virtual_machines/env.yml
 ```
 
 Edita `vars/env.yml` con tus credenciales específicas:
@@ -138,6 +158,33 @@ Instala y configura un cluster Kubernetes ligero:
 sudo ansible-playbook -i inventory.ini install_microk8s.yml
 ```
 
+### Automatización de Máquinas Virtuales
+Crea automáticamente máquinas virtuales con Debian 13.1.0 y configuración desatendida:
+
+```bash
+# Ejecutar automatización completa de VMs
+ansible-playbook vm_automation_master.yml --ask-become-pass
+```
+
+**Lo que hace este playbook:**
+- 🔧 Configura automáticamente variables de entorno desde `task_virtual_machines/env.yml`
+- 💿 Crea ISO personalizada de Debian 13.1.0 con preseed para instalación desatendida
+- 🖥️ Crea máquina virtual con VirtualBox (2GB RAM, 20GB disco, red puente)
+- 🌐 Detecta automáticamente el adaptador de red para configuración puente
+- ⚡ No requiere intervención manual durante el proceso
+- 📁 Utiliza rutas por defecto configurables:
+  - VMs: `/media/jhoann-bohorquez/JABP/VirtualBox VMs`
+  - ISOs: `/home/jhoann-bohorquez/vm/iso`
+
+**Configuración de VMs individuales:**
+```bash
+# Solo crear ISO personalizada
+ansible-playbook virtual_machines/create_custom_iso.yml --ask-become-pass
+
+# Solo crear máquina virtual (requiere ISO existente)
+ansible-playbook virtual_machines/up_virtual_machine.yml --ask-become-pass
+```
+
 ### Configuración del Sistema
 ```bash
 # Configurar hostname
@@ -154,6 +201,20 @@ sudo ansible-playbook -i inventory.ini timezone.yml
 | `deploy_project.yml` | `/home/sysadmin/ansible_project` | Aplicación Stack DevOps |
 | `up_agent_docker.yml` | `/home/sysadmin/agent_project` | Agente Docker |
 | `install_azp_agent.yml` | `/home/sysadmin/agent` | Agente nativo |
+| `vm_automation_master.yml` | Rutas configurables | Máquinas virtuales y ISOs |
+
+### Configuración de Rutas para VMs
+
+Las rutas de las máquinas virtuales se configuran automáticamente en `task_virtual_machines/env.yml`:
+
+```yaml
+# Rutas por defecto (personalizables)
+vm_base_directory_default: "/media/jhoann-bohorquez/JABP/VirtualBox VMs"
+vm_iso_base_default: "/home/jhoann-bohorquez/vm/iso"
+
+# Configuración de red (detección automática)
+bridge_adapter: "{{ ansible_default_ipv4.interface }}"
+```
 
 ## 🔒 Seguridad
 
@@ -189,3 +250,70 @@ cd /home/sysadmin/ansible_project
 docker-compose logs
 ```
 
+### Problemas con VirtualBox o VMs
+```bash
+# Verificar que VirtualBox esté instalado
+vboxmanage --version
+
+# Listar VMs existentes
+vboxmanage list vms
+
+# Verificar permisos en directorios de VMs
+ls -la "/media/jhoann-bohorquez/JABP/VirtualBox VMs"
+ls -la "/home/jhoann-bohorquez/vm/iso"
+
+# Si hay problemas de permisos, crear directorios manualmente:
+sudo mkdir -p "/media/jhoann-bohorquez/JABP/VirtualBox VMs"
+sudo mkdir -p "/home/jhoann-bohorquez/vm/iso"
+sudo chown -R $USER:$USER "/home/jhoann-bohorquez/vm"
+```
+
+### Problemas de red en VMs
+```bash
+# Verificar adaptadores de red disponibles
+ip link show
+
+# El playbook detecta automáticamente el adaptador por defecto
+# Si necesitas especificar uno manualmente, edita:
+nano task_virtual_machines/env.yml
+# Cambia: bridge_adapter: "nombre_de_tu_adaptador"
+```
+
+## 🔄 Requisitos Adicionales para VMs
+
+### Para usar la automatización de máquinas virtuales:
+
+1. **VirtualBox instalado**
+   ```bash
+   sudo apt update
+   sudo apt install virtualbox virtualbox-ext-pack
+   ```
+
+2. **Espacio en disco suficiente**
+   - Mínimo 5GB para ISO personalizada
+   - Mínimo 20GB por VM creada
+   - Espacio adicional para snapshots y logs
+
+3. **Permisos de usuario**
+   ```bash
+   # Agregar usuario al grupo vboxusers
+   sudo usermod -aG vboxusers $USER
+   # Reiniciar sesión después de este comando
+   ```
+
+4. **ISO de Debian 13.1.0**
+   - Se descarga automáticamente si no existe
+   - URL: https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.1.0-amd64-netinst.iso
+
+## 📚 Referencias
+
+- [Documentación de Ansible](https://docs.ansible.com/)
+- [Docker Compose](https://docs.docker.com/compose/)
+- [Azure Pipelines Agent](https://docs.microsoft.com/en-us/azure/devops/pipelines/agents/)
+- [MicroK8s](https://microk8s.io/docs)
+- [VirtualBox Manual](https://www.virtualbox.org/manual/)
+- [Debian Preseed](https://wiki.debian.org/DebianInstaller/Preseed)
+
+---
+
+**Desarrollado por:** [JhoannPV](https://github.com/JhoannPV)  
