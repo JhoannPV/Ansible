@@ -117,8 +117,8 @@
           d-i passwd/root-login boolean false
           d-i passwd/user-uid string 1000
           d-i passwd/username string sysadmin
-          # SHA-512 hash for password: admin123
-          d-i passwd/user-password-crypted password $6$mOVKPpiDXNRZd/gH$o460/niXr72jzlr6pHtchtEJYiSQ4OPefm9EAD5NznNZiX.WV/63YRrMubnEJ0g0XWO7qJWxrYIaHxy6KYtN20
+          # SHA-512 hash for password: 123
+          d-i passwd/user-password-crypted password $6$aATSwAZnhPSjgerR$SCmVpoPHChwm9Glb9sTbP8NJlfPGZhGe2XGX1PvPiOt8vM3X8DPFxMUQLY7EG7fY/OvMnX1XcSp/cG6ZaJxOh.
           d-i passwd/user-fullname string System Administrator
           d-i passwd/user-default-groups string audio cdrom video sudo
           
@@ -289,4 +289,4 @@
           - "VM Base Directory: {{ vm_base_directory }}"
           - "Variables configured automatically for VM creation"
           - "Default user: sysadmin"
-          - "Default password: admin123"
+          - "Default password: 123"
