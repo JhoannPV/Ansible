@@ -1,0 +1,15 @@
+---
+- name: Install Docker
+  hosts: localhost
+  become: yes
+
+  tasks:
+    - name: Prerequisites
+      ansible.builtin.import_tasks: tasks/prereqs.yml
+
+    - name: Docker installation
+      ansible.builtin.import_tasks: tasks/docker.yml
+
+    - name: Ensure sysadmin and groups
+      ansible.builtin.import_tasks: tasks/user.yml
+
