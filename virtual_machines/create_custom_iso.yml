@@ -267,6 +267,17 @@
         path: "{{ mount_dir }}"
         state: unmounted
 
+    - name: Ensure no persistent mount entries in /etc/fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        regexp: ".*{{ mount_dir }}.*"
+        state: absent
+
+    - name: Clean up temporary mount directory
+      ansible.builtin.file:
+        path: "{{ mount_dir }}"
+        state: absent
+
     - name: Set ownership of custom ISO
       ansible.builtin.file:
         path: "{{ custom_iso }}"
@@ -290,3 +301,23 @@
           - "Variables configured automatically for VM creation"
           - "Default user: sysadmin"
           - "Default password: 123"
+      notify: Final cleanup of mount points
+
+  handlers:
+    - name: Final cleanup of mount points
+      block:
+        - name: Force unmount any remaining ISO mounts
+          ansible.builtin.shell: |
+            umount "{{ mount_dir }}" 2>/dev/null || true
+            umount "{{ work_dir }}" 2>/dev/null || true
+          ignore_errors: yes
+        
+        - name: Remove any fstab entries for temporary mounts
+          ansible.builtin.lineinfile:
+            path: /etc/fstab
+            regexp: ".*{{ item }}.*"
+            state: absent
+          loop:
+            - "{{ mount_dir }}"
+            - "{{ work_dir }}"
+          ignore_errors: yes
