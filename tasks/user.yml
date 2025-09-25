@@ -11,3 +11,9 @@
     name: sysadmin
     groups: docker
     append: yes
+
+- name: Refresh group membership for current session
+  ansible.builtin.shell: newgrp docker
+  become: yes
+  become_user: sysadmin
+  ignore_errors: yes
