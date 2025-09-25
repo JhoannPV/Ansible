@@ -1,8 +1,10 @@
 # Update apt cache (Debian) and install base packages
+- name: Update apt cache (Debian systems)
   ansible.builtin.apt:
     update_cache: yes
   when: ansible_os_family == "Debian"
 
+- name: Install base packages
   ansible.builtin.package:
     name:
       - curl
@@ -10,12 +12,9 @@
       - openssh-server
     state: present
 
+- name: Enable SSH service
   ansible.builtin.systemd:
     name: ssh
     enabled: yes
-  when: ansible_service_mgr == 'systemd'
-
-  ansible.builtin.systemd:
-    name: ssh
     state: started
   when: ansible_service_mgr == 'systemd'
