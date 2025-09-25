@@ -12,8 +12,36 @@
     groups: docker
     append: yes
 
-- name: Refresh group membership for current session
-  ansible.builtin.shell: newgrp docker
+- name: Reset ssh connection to refresh group membership
+  ansible.builtin.meta: reset_connection
+  when: ansible_connection == "ssh"
+
+- name: Test docker access without sudo
+  ansible.builtin.command: docker ps
   become: yes
   become_user: sysadmin
+  register: docker_test
   ignore_errors: yes
+
+- name: Force group refresh if docker test fails
+  ansible.builtin.shell: |
+    sudo usermod -aG docker sysadmin
+    sudo systemctl restart docker
+    sleep 2
+  when: docker_test.failed | default(false)
+
+- name: Final docker test
+  ansible.builtin.command: docker ps
+  become: yes
+  become_user: sysadmin
+  register: final_docker_test
+  ignore_errors: yes
+
+- name: Display docker access status
+  ansible.builtin.debug:
+    msg: |
+      {% if final_docker_test.rc == 0 %}
+      ✅ Docker access configured successfully - no sudo required
+      {% else %}
+      ⚠️  Docker group membership added, but may require logout/login or system restart to take full effect
+      {% endif %}
