@@ -186,16 +186,9 @@
       failed_when: false
       changed_when: false
 
-    - name: Crear script wrapper kubectl que ejecute microk8s kubectl
-      ansible.builtin.copy:
-        dest: /usr/local/bin/kubectl
-        content: |
-          #!/bin/bash
-          # Wrapper script for kubectl -> microk8s kubectl
-          exec /snap/bin/microk8s kubectl "$@"
-        mode: '0755'
-        owner: root
-        group: root
+    - name: Crear enlace simbólico kubectl (comando exacto)
+      ansible.builtin.command: ln -sf /snap/bin/microk8s.kubectl /usr/local/bin/kubectl
+      changed_when: false
 
     - name: Agregar alias kubectl en .bashrc de sysadmin
       ansible.builtin.lineinfile:
@@ -219,16 +212,6 @@
         mode: '0644'
         create: yes
 
-    - name: Asegurar que /usr/local/bin esté en PATH de sysadmin
-      ansible.builtin.lineinfile:
-        path: /home/sysadmin/.bashrc
-        regexp: '^export PATH=.*\/usr\/local\/bin'
-        line: 'export PATH="/usr/local/bin:$PATH"'
-        insertafter: EOF
-        owner: sysadmin
-        group: sysadmin
-        mode: '0644'
-
     - name: Verificar acceso de sysadmin a microk8s sin sudo
       ansible.builtin.command: /snap/bin/microk8s status
       become: yes
@@ -237,10 +220,8 @@
       failed_when: false
       changed_when: false
 
-    - name: Verificar que kubectl funciona directamente (script wrapper)
-      ansible.builtin.shell: |
-        export PATH="/usr/local/bin:$PATH"
-        kubectl version --client
+    - name: Verificar que kubectl funciona directamente
+      ansible.builtin.command: /usr/local/bin/kubectl version --client
       become: yes
       become_user: sysadmin
       register: kubectl_test
