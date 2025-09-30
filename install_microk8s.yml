@@ -108,32 +108,27 @@
         path: /snap/bin/microk8s
       register: microk8s_bin
 
-    - name: Crear symlink /usr/local/bin/microk8s -> /snap/bin/microk8s (acceso inmediato)
-      ansible.builtin.file:
-        src: /snap/bin/microk8s
+    - name: Crear wrapper /usr/local/bin/microk8s que usa el grupo microk8s (acceso inmediato)
+      ansible.builtin.copy:
         dest: /usr/local/bin/microk8s
-        state: link
-        force: yes
+        content: |
+          #!/bin/bash
+          exec sg microk8s -c "/snap/bin/microk8s \"$@\""
         owner: root
         group: root
         mode: '0755'
       when: microk8s_bin.stat.exists | default(false)
 
-    - name: Crear symlink /usr/local/bin/kubectl -> /snap/bin/microk8s.kubectl (opcional)
-      ansible.builtin.file:
-        src: /snap/bin/microk8s.kubectl
+    - name: Crear wrapper /usr/local/bin/kubectl que usa microk8s (sin necesidad de newgrp)
+      ansible.builtin.copy:
         dest: /usr/local/bin/kubectl
-        state: link
-        force: yes
+        content: |
+          #!/bin/bash
+          exec sg microk8s -c "/snap/bin/microk8s.kubectl \"$@\""
         owner: root
         group: root
         mode: '0755'
       when: microk8s_bin.stat.exists | default(false)
-
-  handlers:
-    - name: Recargar perfil no es automático
-      ansible.builtin.debug:
-        msg: "Se agregó /snap/bin al PATH en /etc/profile.d/snap_path.sh. Abre una nueva sesión o ejecuta 'source /etc/profile'."
 
     - name: Esperar a que MicroK8s esté listo
       ansible.builtin.command: /snap/bin/microk8s status --wait-ready --timeout 600
@@ -145,8 +140,6 @@
       register: microk8s_enable
       changed_when: "'Nothing to do for' not in microk8s_enable.stdout"
       failed_when: false
-      become: yes
-      become_user: root
 
     - name: Obtener kubeconfig desde microk8s
       ansible.builtin.command: /snap/bin/microk8s config
@@ -170,3 +163,8 @@
         group: root
         mode: '0600'
       when: ansible_user_id == 'root'
+
+  handlers:
+    - name: Recargar perfil no es automático
+      ansible.builtin.debug:
+        msg: "Se agregó /snap/bin al PATH en /etc/profile.d/snap_path.sh. Abre una nueva sesión o ejecuta 'source /etc/profile'."
