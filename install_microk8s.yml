@@ -130,61 +130,6 @@
         mode: '0755'
       when: microk8s_bin.stat.exists | default(false)
 
-    - name: Agregar usuario sysadmin al grupo microk8s (específico)
-      ansible.builtin.command: usermod -a -G microk8s sysadmin
-      failed_when: false
-      changed_when: false
-
-    - name: Cambiar propietario de ~/.kube para sysadmin
-      ansible.builtin.file:
-        path: /home/sysadmin/.kube
-        owner: sysadmin
-        group: sysadmin
-        recurse: yes
-      when: ansible_user_id == 'sysadmin' or ansible_user_id != 'root'
-
-    - name: Reiniciar snap.microk8s.daemon-apiserver para aplicar permisos
-      ansible.builtin.systemd:
-        name: snap.microk8s.daemon-apiserver
-        state: restarted
-      failed_when: false
-
-    - name: Configurar permisos del directorio de credenciales
-      ansible.builtin.file:
-        path: /var/snap/microk8s/current/credentials
-        group: microk8s
-        mode: '0750'
-        recurse: yes
-      failed_when: false
-
-    - name: Reset conexión SSH para refrescar grupos
-      ansible.builtin.meta: reset_connection
-      when: ansible_connection == "ssh"
-
-    - name: Test acceso MicroK8s sin sudo para sysadmin
-      ansible.builtin.command: /snap/bin/microk8s status
-      become: yes
-      become_user: sysadmin
-      register: microk8s_test_sudo
-      failed_when: false
-      changed_when: false
-
-    - name: Mostrar resultado del test de acceso
-      ansible.builtin.debug:
-        msg:
-          - "✅ MicroK8s configurado para uso sin sudo"
-          - "✅ Usuario sysadmin agregado al grupo microk8s"
-          - "✅ Permisos configurados correctamente"
-          - "{% if microk8s_test_sudo.rc == 0 %}✅ Test sin sudo: EXITOSO{% else %}⚠️  Test sin sudo: Requiere logout/login{% endif %}"
-          - ""
-          - "Comandos disponibles SIN SUDO:"
-          - "- microk8s status"
-          - "- microk8s kubectl get nodes"
-          - "- kubectl get nodes"
-          - ""
-          - "{% if microk8s_test_sudo.rc != 0 %}Para activar sin reiniciar:{% endif %}"
-          - "{% if microk8s_test_sudo.rc != 0 %}sudo su - sysadmin{% endif %}"
-
   handlers:
     - name: Recargar perfil no es automático
       ansible.builtin.debug:
@@ -225,3 +170,69 @@
         group: root
         mode: '0600'
       when: ansible_user_id == 'root'
+
+    - name: Configurar permisos correctos para sockets de MicroK8s
+      ansible.builtin.file:
+        path: "{{ item }}"
+        group: microk8s
+        mode: '0775'
+      loop:
+        - /var/snap/microk8s/current/credentials
+        - /var/snap/microk8s/current/certs
+        - /var/snap/microk8s/current
+      failed_when: false
+
+    - name: Configurar permisos del socket de containerd
+      ansible.builtin.file:
+        path: /var/snap/microk8s/current/run/containerd.sock
+        group: microk8s
+        mode: '0660'
+      failed_when: false
+
+    - name: Agregar configuración de sudoers para MicroK8s
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/microk8s
+        content: |
+          # Allow microk8s group to run microk8s commands without password
+          %microk8s ALL=(ALL) NOPASSWD: /snap/bin/microk8s*
+        mode: '0440'
+        owner: root
+        group: root
+
+    - name: Crear wrapper script para microk8s kubectl
+      ansible.builtin.copy:
+        dest: /usr/local/bin/kubectl-microk8s
+        content: |
+          #!/bin/bash
+          exec /snap/bin/microk8s kubectl "$@"
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: Verificar que sysadmin puede ejecutar microk8s sin sudo
+      ansible.builtin.command: /snap/bin/microk8s status
+      become: yes
+      become_user: sysadmin
+      register: microk8s_test_final
+      failed_when: false
+      changed_when: false
+
+    - name: Mostrar estado final de configuración
+      ansible.builtin.debug:
+        msg:
+          - "=== CONFIGURACIÓN DE MICROK8S COMPLETADA ==="
+          - "✅ MicroK8s instalado y configurado"
+          - "✅ Usuario sysadmin agregado al grupo microk8s"
+          - "✅ Permisos de sockets configurados"
+          - "✅ Sudoers configurado para comandos MicroK8s"
+          - "{% if microk8s_test_final.rc == 0 %}✅ Test final: Usuario puede ejecutar microk8s SIN SUDO{% else %}⚠️  Test final: Aún requiere configuración adicional{% endif %}"
+          - ""
+          - "COMANDOS DISPONIBLES:"
+          - "- microk8s status (sin sudo)"
+          - "- microk8s kubectl get nodes (sin sudo)"
+          - "- kubectl-microk8s get nodes (wrapper script)"
+          - ""
+          - "{% if microk8s_test_final.rc != 0 %}SOLUCIÓN si aún requiere sudo:{% endif %}"
+          - "{% if microk8s_test_final.rc != 0 %}1. Cerrar sesión y volver a iniciar como sysadmin{% endif %}"
+          - "{% if microk8s_test_final.rc != 0 %}2. O ejecutar: newgrp microk8s{% endif %}"
+          - "==============================================="
