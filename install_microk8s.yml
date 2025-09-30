@@ -171,23 +171,22 @@
         mode: '0600'
       when: ansible_user_id == 'root'
 
-    - name: Agregar usuario sysadmin al grupo microk8s (comando exacto)
-      ansible.builtin.command: usermod -a -G microk8s sysadmin
+    - name: Agregar usuario sysadmin al grupo microk8s (comando exacto con sudo)
+      ansible.builtin.command: sudo usermod -a -G microk8s sysadmin
       changed_when: false
 
-    - name: Cambiar propietario de ~/.kube para sysadmin (comando exacto)
-      ansible.builtin.command: chown -R sysadmin /home/sysadmin/.kube
+    - name: Cambiar propietario de ~/.kube para sysadmin (comando exacto con sudo)
+      ansible.builtin.command: sudo chown -R sysadmin /home/sysadmin/.kube
       failed_when: false
       changed_when: false
 
-    - name: Refrescar membresía de grupo microk8s para sysadmin
-      ansible.builtin.shell: |
-        su - sysadmin -c "newgrp microk8s"
+    - name: Refrescar membresía de grupo microk8s para sysadmin (con sudo)
+      ansible.builtin.command: sudo -u sysadmin newgrp microk8s
       failed_when: false
       changed_when: false
 
-    - name: Crear enlace simbólico kubectl (comando exacto)
-      ansible.builtin.command: ln -sf /snap/bin/microk8s.kubectl /usr/local/bin/kubectl
+    - name: Crear enlace simbólico kubectl (comando exacto con sudo)
+      ansible.builtin.command: sudo ln -sf /snap/bin/microk8s.kubectl /usr/local/bin/kubectl
       changed_when: false
 
     - name: Agregar alias kubectl en .bashrc de sysadmin
