@@ -172,107 +172,112 @@
       when: ansible_user_id == 'root'
 
     # ==========================================
-    # CONFIGURACIÓN ROBUSTA PARA USUARIO SYSADMIN
+    # SCRIPT POST-INSTALACIÓN PARA EJECUCIÓN MANUAL
     # ==========================================
     
-    - name: 1. Agregar sysadmin al grupo microk8s (FORZADO)
-      ansible.builtin.shell: |
-        usermod -a -G microk8s sysadmin
-        # Verificar que se agregó correctamente
-        groups sysadmin | grep -q microk8s && echo "Usuario agregado al grupo microk8s" || echo "Error al agregar usuario"
-      register: usermod_result
-      
-    - name: 2. Crear directorio .kube para sysadmin si no existe
-      ansible.builtin.file:
-        path: /home/sysadmin/.kube
-        state: directory
-        owner: sysadmin
-        group: sysadmin
-        mode: '0755'
-
-    - name: 3. Cambiar propietario de ~/.kube recursivamente (FORZADO)
-      ansible.builtin.shell: |
-        chown -R sysadmin:sysadmin /home/sysadmin/.kube
-        chmod -R 755 /home/sysadmin/.kube
-        ls -la /home/sysadmin/.kube
-      register: chown_result
-
-    - name: 4. Crear enlace simbólico kubectl (FORZADO)
-      ansible.builtin.shell: |
-        rm -f /usr/local/bin/kubectl
-        ln -sf /snap/bin/microk8s.kubectl /usr/local/bin/kubectl
-        ls -la /usr/local/bin/kubectl
-      register: symlink_result
-
-    - name: 5. Configurar permisos especiales de MicroK8s
-      ansible.builtin.shell: |
-        # Permisos del socket de MicroK8s
-        chmod g+rw /var/snap/microk8s/current/credentials/client.config 2>/dev/null || true
-        chgrp microk8s /var/snap/microk8s/current/credentials/client.config 2>/dev/null || true
-        
-        # Permisos del directorio credentials
-        chmod g+rx /var/snap/microk8s/current/credentials 2>/dev/null || true
-        chgrp microk8s /var/snap/microk8s/current/credentials 2>/dev/null || true
-      register: perms_result
-      failed_when: false
-
-    - name: 6. Crear script de activación para sysadmin
+    - name: Crear script de configuración post-instalación
       ansible.builtin.copy:
-        dest: /home/sysadmin/activate_microk8s.sh
-        owner: sysadmin
-        group: sysadmin
+        dest: /tmp/configure_microk8s_sysadmin.sh
         mode: '0755'
         content: |
           #!/bin/bash
-          echo "=== Activando MicroK8s para usuario sysadmin ==="
-          echo "Grupos actuales: $(groups)"
+          echo "=== Configurando MicroK8s para usuario sysadmin ==="
           
-          # Forzar nuevo grupo
-          exec newgrp microk8s
+          # 1. Agregar usuario al grupo
+          echo "1. Agregando sysadmin al grupo microk8s..."
+          usermod -a -G microk8s sysadmin
           
-    - name: 7. Agregar aliases permanentes al .bashrc
-      ansible.builtin.blockinfile:
-        path: /home/sysadmin/.bashrc
+          # 2. Configurar directorio .kube
+          echo "2. Configurando directorio .kube..."
+          mkdir -p /home/sysadmin/.kube
+          chown -R sysadmin:sysadmin /home/sysadmin/.kube
+          chmod 755 /home/sysadmin/.kube
+          
+          # 3. Crear enlace simbólico kubectl
+          echo "3. Creando enlace simbólico para kubectl..."
+          rm -f /usr/local/bin/kubectl
+          ln -sf /snap/bin/microk8s.kubectl /usr/local/bin/kubectl
+          
+          # 4. Configurar aliases
+          echo "4. Configurando aliases en .bashrc..."
+          if ! grep -q "alias kubectl=" /home/sysadmin/.bashrc 2>/dev/null; then
+            echo 'alias kubectl="/usr/local/bin/kubectl"' >> /home/sysadmin/.bashrc
+            echo 'alias k="kubectl"' >> /home/sysadmin/.bashrc
+          fi
+          
+          # 5. Mostrar estado
+          echo "5. Verificando configuración..."
+          echo "   Grupos de sysadmin: $(groups sysadmin)"
+          echo "   Enlace kubectl: $(ls -la /usr/local/bin/kubectl 2>/dev/null || echo 'No encontrado')"
+          echo "   Directorio .kube: $(ls -ld /home/sysadmin/.kube 2>/dev/null || echo 'No encontrado')"
+          
+          echo ""
+          echo "=== CONFIGURACIÓN COMPLETADA ==="
+          echo "Para usar MicroK8s como sysadmin:"
+          echo "1. sudo su - sysadmin"
+          echo "2. newgrp microk8s"
+          echo "3. kubectl get nodes"
+          echo ""
+
+    - name: Ejecutar script de configuración
+      ansible.builtin.command: /tmp/configure_microk8s_sysadmin.sh
+      register: config_script_result
+
+    - name: Mostrar resultado del script de configuración
+      ansible.builtin.debug:
+        var: config_script_result.stdout_lines
+
+    - name: Crear instrucciones finales para el usuario
+      ansible.builtin.copy:
+        dest: /home/sysadmin/INSTRUCCIONES_MICROK8S.txt
         owner: sysadmin
         group: sysadmin
-        create: yes
-        block: |
-          # Aliases para MicroK8s
-          alias kubectl='/usr/local/bin/kubectl'
-          alias k='kubectl'
-          alias microk8s='/snap/bin/microk8s'
+        mode: '0644'
+        content: |
+          ============================================
+          INSTRUCCIONES PARA USAR MICROK8S SIN SUDO
+          ============================================
           
-          # Verificar si está en grupo microk8s
-          if groups | grep -q microk8s; then
-            echo "✅ Usuario en grupo microk8s - MicroK8s listo"
-          else
-            echo "⚠️  Ejecuta: newgrp microk8s"
-          fi
+          Si aún necesitas sudo para usar microk8s, ejecuta estos comandos:
+          
+          1. Cambiar a usuario sysadmin:
+             sudo su - sysadmin
+          
+          2. Activar grupo microk8s:
+             newgrp microk8s
+          
+          3. Probar kubectl:
+             kubectl get nodes
+             microk8s status
+          
+          COMANDOS ALTERNATIVOS SI LO ANTERIOR NO FUNCIONA:
+          
+          sudo usermod -a -G microk8s sysadmin
+          sudo chown -R sysadmin:sysadmin /home/sysadmin/.kube
+          sudo ln -sf /snap/bin/microk8s.kubectl /usr/local/bin/kubectl
+          
+          Luego:
+          sudo su - sysadmin
+          newgrp microk8s
+          kubectl get nodes
+          
+          ============================================
 
-    - name: 8. Test final como usuario sysadmin
-      ansible.builtin.shell: |
-        sudo -u sysadmin /snap/bin/microk8s status --wait-ready --timeout 30
-      register: final_test
-      failed_when: false
-      timeout: 45
-
-    - name: 9. MOSTRAR RESULTADOS DE CONFIGURACIÓN
+    - name: MOSTRAR INSTRUCCIONES FINALES
       ansible.builtin.debug:
         msg:
           - "=========================================="
-          - "CONFIGURACIÓN MICROK8S PARA SYSADMIN"
+          - "MICROK8S INSTALADO"
           - "=========================================="
-          - "1. Usermod: {{ usermod_result.stdout_lines | default(['Error']) }}"
-          - "2. Chown result: {{ chown_result.stdout_lines | default(['Error']) }}"
-          - "3. Symlink: {{ symlink_result.stdout_lines | default(['Error']) }}"
-          - "4. Permisos especiales: {{ 'Aplicados' if perms_result.rc == 0 else 'Con errores' }}"
-          - "5. Test final: {{ 'EXITOSO' if final_test.rc == 0 else 'FALLÓ - requiere configuración manual' }}"
+          - "✅ MicroK8s instalado correctamente"
+          - "✅ Script de configuración ejecutado"
+          - "✅ Instrucciones creadas en /home/sysadmin/INSTRUCCIONES_MICROK8S.txt"
           - ""
-          - "COMANDOS PARA USAR MANUALMENTE SI FALLA:"
-          - "sudo usermod -a -G microk8s sysadmin"
-          - "sudo chown -R sysadmin:sysadmin /home/sysadmin/.kube"
-          - "sudo ln -sf /snap/bin/microk8s.kubectl /usr/local/bin/kubectl"
-          - "sudo su - sysadmin"
-          - "newgrp microk8s"
-          - "kubectl get nodes"
+          - "PARA USAR MICROK8S SIN SUDO:"
+          - "1. sudo su - sysadmin"
+          - "2. newgrp microk8s"
+          - "3. kubectl get nodes"
+          - ""
+          - "Si necesitas configuración manual, lee:"
+          - "/home/sysadmin/INSTRUCCIONES_MICROK8S.txt"
           - "=========================================="
