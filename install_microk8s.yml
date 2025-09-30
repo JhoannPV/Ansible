@@ -113,9 +113,22 @@
         mode: '0600'
       when: ansible_user_id == 'root'
 
-    - name: Verificar permisos de MicroK8s para el usuario
+    - name: Forzar recarga de grupos del usuario (solucionando problema de permisos)
+      ansible.builtin.command: sg microk8s -c "/snap/bin/microk8s status --wait-ready --timeout 30"
+      become: yes
+      become_user: "{{ ansible_user_id }}"
+      register: microk8s_sg_test
+      failed_when: false
+      changed_when: false
+      when: ansible_user_id != 'root'
+
+    - name: Verificar permisos finales de MicroK8s
       ansible.builtin.shell: |
-        sg microk8s -c "/snap/bin/microk8s kubectl get nodes" 2>/dev/null || echo "NEEDS_RELOAD"
+        if sg microk8s -c "/snap/bin/microk8s kubectl get nodes" 2>/dev/null; then
+          echo "PERMISSIONS_OK"
+        else
+          echo "NEEDS_MANUAL_RELOAD"
+        fi
       become: yes
       become_user: "{{ ansible_user_id }}"
       register: microk8s_permission_test
@@ -127,9 +140,23 @@
         dest: "/home/{{ ansible_user_id }}/reload_microk8s_groups.sh"
         content: |
           #!/bin/bash
-          echo "🔧 Recargando grupos de MicroK8s para el usuario {{ ansible_user_id }}..."
-          echo "💡 Ejecutando: newgrp microk8s"
-          echo "✅ Después de esto podrás usar 'kubectl' o 'microk8s kubectl'"
+          echo "🔧 Activando MicroK8s para el usuario {{ ansible_user_id }}..."
+          echo "💡 Recargando grupos del sistema..."
+          echo ""
+          
+          # Verificar si el usuario ya está en el grupo
+          if groups | grep -q microk8s; then
+            echo "✅ Usuario ya está en el grupo 'microk8s'"
+          else
+            echo "❌ Usuario no está en el grupo 'microk8s'"
+            echo "🔧 Ejecuta: sudo usermod -a -G microk8s {{ ansible_user_id }}"
+            exit 1
+          fi
+          
+          echo "� Iniciando nueva sesión con grupo microk8s..."
+          echo "✅ Después podrás usar:"
+          echo "   • microk8s kubectl get nodes"
+          echo "   • kubectl get nodes (alias)"
           echo ""
           exec newgrp microk8s
         owner: "{{ ansible_user_id }}"
@@ -144,32 +171,39 @@
           
           📋 ESTADO DE PERMISOS:
           {% if ansible_user_id != 'root' %}
-          {% if 'NEEDS_RELOAD' in microk8s_permission_test.stdout %}
-          ⚠️  Necesitas recargar los grupos del usuario
+          {% if 'NEEDS_MANUAL_RELOAD' in microk8s_permission_test.stdout %}
+          ⚠️  El usuario {{ ansible_user_id }} necesita recargar grupos
           
-          🔧 SOLUCIONES (elige una):
+          🔧 EJECUTA UNO DE ESTOS COMANDOS AHORA:
           
-          1️⃣ Ejecutar script automático:
+          🚀 OPCIÓN 1 - Script automático (recomendado):
              ./reload_microk8s_groups.sh
           
-          2️⃣ Comando manual:
+          🚀 OPCIÓN 2 - Comando directo:
              newgrp microk8s
           
-          3️⃣ Reiniciar sesión:
-             Cierra sesión y vuelve a entrar
+          🚀 OPCIÓN 3 - Con sg (alternativo):
+             sg microk8s
           
-          ✅ Después podrás usar:
-             kubectl get nodes
+          💡 O reinicia la sesión (logout/login)
+          
+          ✅ DESPUÉS DE RECARGAR GRUPOS, PRUEBA:
              microk8s kubectl get nodes
+             kubectl get nodes  (con alias)
           {% else %}
-          ✅ Los permisos están configurados correctamente
-          ✅ Puedes usar kubectl directamente
+          ✅ Los permisos están funcionando correctamente
+          ✅ Puedes usar 'microk8s kubectl' y 'kubectl' directamente
           {% endif %}
           {% else %}
           ✅ Instalación como root completada
           {% endif %}
           
-          🌐 Para acceder desde otros nodos:
+          📁 Archivos de configuración:
+             • ~/.kube/config (kubeconfig)
+             • ~/.bashrc (alias kubectl)
+             • ./reload_microk8s_groups.sh (helper script)
+          
+          🌐 Para exportar configuración:
              microk8s config > kubeconfig.yaml
 
     - name: Asegurar que /snap/bin esté en el PATH del usuario actual
