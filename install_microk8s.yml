@@ -130,6 +130,30 @@
         mode: '0755'
       when: microk8s_bin.stat.exists | default(false)
 
+    # Alias solicitado: kubectl -> "microk8s kubectl"
+    - name: Añadir alias kubectl en ~/.bashrc (usuario no root)
+      ansible.builtin.lineinfile:
+        path: "/home/{{ ansible_user_id }}/.bashrc"
+        regexp: "^alias kubectl='microk8s kubectl'$"
+        line: "alias kubectl='microk8s kubectl'"
+        create: yes
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+        mode: '0644'
+      when: ansible_user_id != 'root' and (microk8s_bin.stat.exists | default(false))
+      become: yes
+
+    - name: Añadir alias kubectl en /root/.bashrc (root)
+      ansible.builtin.lineinfile:
+        path: "/root/.bashrc"
+        regexp: "^alias kubectl='microk8s kubectl'$"
+        line: "alias kubectl='microk8s kubectl'"
+        create: yes
+        owner: root
+        group: root
+        mode: '0644'
+      when: ansible_user_id == 'root' and (microk8s_bin.stat.exists | default(false))
+
   handlers:
     - name: Recargar perfil no es automático
       ansible.builtin.debug:
