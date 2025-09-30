@@ -103,28 +103,38 @@
         insertafter: EOF
       when: ansible_user_id == 'root'
 
+    - name: Crear alias kubectl para microk8s en ~/.bashrc (usuario no root)
+      ansible.builtin.lineinfile:
+        path: "/home/{{ ansible_user_id }}/.bashrc"
+        regexp: "^alias kubectl='microk8s kubectl'"
+        line: "alias kubectl='microk8s kubectl'"
+        insertafter: EOF
+        create: yes
+      become: false
+      when: ansible_user_id != 'root'
+
     - name: Comprobar si existe /snap/bin/microk8s
       ansible.builtin.stat:
         path: /snap/bin/microk8s
       register: microk8s_bin
 
-    - name: Crear wrapper /usr/local/bin/microk8s que usa el grupo microk8s (acceso inmediato)
-      ansible.builtin.copy:
+    - name: Crear symlink /usr/local/bin/microk8s -> /snap/bin/microk8s
+      ansible.builtin.file:
+        src: /snap/bin/microk8s
         dest: /usr/local/bin/microk8s
-        content: |
-          #!/bin/bash
-          exec sg microk8s -c "/snap/bin/microk8s \"$@\""
+        state: link
+        force: yes
         owner: root
         group: root
         mode: '0755'
       when: microk8s_bin.stat.exists | default(false)
 
-    - name: Crear wrapper /usr/local/bin/kubectl que usa microk8s (sin necesidad de newgrp)
-      ansible.builtin.copy:
+    - name: Crear symlink /usr/local/bin/kubectl -> /snap/bin/microk8s.kubectl
+      ansible.builtin.file:
+        src: /snap/bin/microk8s.kubectl
         dest: /usr/local/bin/kubectl
-        content: |
-          #!/bin/bash
-          exec sg microk8s -c "/snap/bin/microk8s.kubectl \"$@\""
+        state: link
+        force: yes
         owner: root
         group: root
         mode: '0755'
