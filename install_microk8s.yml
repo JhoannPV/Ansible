@@ -143,23 +143,47 @@
         recurse: yes
       when: ansible_user_id == 'sysadmin' or ansible_user_id != 'root'
 
-    - name: Mostrar información de instalación completada
+    - name: Reiniciar snap.microk8s.daemon-apiserver para aplicar permisos
+      ansible.builtin.systemd:
+        name: snap.microk8s.daemon-apiserver
+        state: restarted
+      failed_when: false
+
+    - name: Configurar permisos del directorio de credenciales
+      ansible.builtin.file:
+        path: /var/snap/microk8s/current/credentials
+        group: microk8s
+        mode: '0750'
+        recurse: yes
+      failed_when: false
+
+    - name: Reset conexión SSH para refrescar grupos
+      ansible.builtin.meta: reset_connection
+      when: ansible_connection == "ssh"
+
+    - name: Test acceso MicroK8s sin sudo para sysadmin
+      ansible.builtin.command: /snap/bin/microk8s status
+      become: yes
+      become_user: sysadmin
+      register: microk8s_test_sudo
+      failed_when: false
+      changed_when: false
+
+    - name: Mostrar resultado del test de acceso
       ansible.builtin.debug:
         msg:
-          - "✅ MicroK8s instalado y configurado correctamente"
+          - "✅ MicroK8s configurado para uso sin sudo"
           - "✅ Usuario sysadmin agregado al grupo microk8s"
-          - "✅ Permisos de ~/.kube configurados para sysadmin"
-          - "✅ Enlaces simbólicos creados para acceso directo"
+          - "✅ Permisos configurados correctamente"
+          - "{% if microk8s_test_sudo.rc == 0 %}✅ Test sin sudo: EXITOSO{% else %}⚠️  Test sin sudo: Requiere logout/login{% endif %}"
           - ""
-          - "Comandos disponibles:"
+          - "Comandos disponibles SIN SUDO:"
           - "- microk8s status"
           - "- microk8s kubectl get nodes"
-          - "- kubectl get nodes (si usas el enlace simbólico)"
+          - "- kubectl get nodes"
           - ""
-          - "Para activar los cambios de grupo, ejecuta:"
-          - "sudo su - sysadmin"
-          - "o"
-          - "newgrp microk8s"
+          - "{% if microk8s_test_sudo.rc != 0 %}Para activar sin reiniciar:{% endif %}"
+          - "{% if microk8s_test_sudo.rc != 0 %}sudo su - sysadmin{% endif %}"
 
   handlers:
     - name: Recargar perfil no es automático
