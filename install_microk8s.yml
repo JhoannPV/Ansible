@@ -34,6 +34,27 @@
         classic: yes
         state: present
 
+    - name: Agregar clave GPG del repositorio de Kubernetes
+      ansible.builtin.apt_key:
+        url: https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key
+        keyring: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Agregar repositorio de Kubernetes
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /"
+        filename: kubernetes
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Instalar kubectl
+      ansible.builtin.apt:
+        name: kubectl
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
 
     - name: Agregar usuario actual al grupo microk8s
       ansible.builtin.user:
@@ -57,3 +78,40 @@
       failed_when: false
       become: yes
       become_user: root
+
+    - name: Esperar a que MicroK8s esté listo
+      ansible.builtin.command: microk8s status --wait-ready
+      register: microk8s_status
+      changed_when: false
+      retries: 5
+      delay: 10
+
+    - name: Crear alias para kubectl en el perfil del usuario
+      ansible.builtin.lineinfile:
+        path: "/home/{{ ansible_user_id }}/.bashrc"
+        regexp: '^alias kubectl='
+        line: 'alias kubectl="microk8s kubectl"'
+        insertafter: EOF
+      become: false
+      when: ansible_user_id != 'root'
+
+    - name: Configurar kubeconfig para kubectl
+      ansible.builtin.shell: |
+        microk8s config > /home/{{ ansible_user_id }}/.kube/config
+        chown {{ ansible_user_id }}:{{ ansible_user_id }} /home/{{ ansible_user_id }}/.kube/config
+        chmod 600 /home/{{ ansible_user_id }}/.kube/config
+      when: ansible_user_id != 'root'
+
+    - name: Mostrar información de instalación
+      ansible.builtin.debug:
+        msg:
+          - "✅ MicroK8s y kubectl instalados correctamente"
+          - "✅ Usuario {{ ansible_user_id }} agregado al grupo microk8s"
+          - "✅ Kubeconfig configurado en ~/.kube/config"
+          - ""
+          - "Para usar kubectl después de la instalación:"
+          - "1. Reinicia tu sesión o ejecuta: newgrp microk8s"
+          - "2. Usa: kubectl get nodes"
+          - "3. O usa directamente: microk8s kubectl get nodes"
+          - ""
+          - "Complementos habilitados: dns, storage"
