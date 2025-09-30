@@ -186,15 +186,16 @@
       failed_when: false
       changed_when: false
 
-    - name: Crear enlace simbólico kubectl -> microk8s.kubectl
-      ansible.builtin.file:
-        src: /snap/bin/microk8s.kubectl
+    - name: Crear script wrapper kubectl que ejecute microk8s kubectl
+      ansible.builtin.copy:
         dest: /usr/local/bin/kubectl
-        state: link
-        force: yes
+        content: |
+          #!/bin/bash
+          # Wrapper script for kubectl -> microk8s kubectl
+          exec /snap/bin/microk8s kubectl "$@"
+        mode: '0755'
         owner: root
         group: root
-        mode: '0755'
 
     - name: Agregar alias kubectl en .bashrc de sysadmin
       ansible.builtin.lineinfile:
@@ -218,6 +219,16 @@
         mode: '0644'
         create: yes
 
+    - name: Asegurar que /usr/local/bin esté en PATH de sysadmin
+      ansible.builtin.lineinfile:
+        path: /home/sysadmin/.bashrc
+        regexp: '^export PATH=.*\/usr\/local\/bin'
+        line: 'export PATH="/usr/local/bin:$PATH"'
+        insertafter: EOF
+        owner: sysadmin
+        group: sysadmin
+        mode: '0644'
+
     - name: Verificar acceso de sysadmin a microk8s sin sudo
       ansible.builtin.command: /snap/bin/microk8s status
       become: yes
@@ -226,8 +237,10 @@
       failed_when: false
       changed_when: false
 
-    - name: Verificar que kubectl funciona directamente
-      ansible.builtin.command: /usr/local/bin/kubectl version --client
+    - name: Verificar que kubectl funciona directamente (script wrapper)
+      ansible.builtin.shell: |
+        export PATH="/usr/local/bin:$PATH"
+        kubectl version --client
       become: yes
       become_user: sysadmin
       register: kubectl_test
@@ -241,24 +254,14 @@
           - "✅ Usuario sysadmin agregado al grupo microk8s"
           - "✅ Permisos de ~/.kube configurados correctamente"
           - "✅ Membresía de grupo refrescada con newgrp"
-          - "✅ Enlace simbólico kubectl creado en /usr/local/bin/kubectl"
-          - "✅ Alias kubectl agregado a .bashrc y .profile"
-          - "{% if microk8s_access_test.rc == 0 %}✅ Test microk8s: EXITOSO - funciona SIN SUDO{% else %}⚠️  Test microk8s: Requiere logout/login{% endif %}"
-          - "{% if kubectl_test.rc == 0 %}✅ Test kubectl: EXITOSO - funciona directamente{% else %}⚠️  Test kubectl: Enlace simbólico creado{% endif %}"
+          - "{% if microk8s_access_test.rc == 0 %}✅ Test de acceso: EXITOSO - sysadmin puede usar microk8s SIN SUDO{% else %}⚠️  Test de acceso: Requiere logout/login para aplicar cambios{% endif %}"
           - ""
           - "COMANDOS DISPONIBLES SIN SUDO:"
           - "- microk8s status"
           - "- microk8s kubectl get nodes"
-          - "- kubectl get nodes  ⭐ (DIRECTO - sin prefijo microk8s)"
-          - "- kubectl version"
           - "- microk8s enable <addon>"
           - ""
-          - "FORMAS DE USAR KUBECTL:"
-          - "1. kubectl get nodes (enlace simbólico)"
-          - "2. kubectl get nodes (alias en nueva sesión)"
-          - "3. microk8s kubectl get nodes (comando completo)"
-          - ""
-          - "{% if microk8s_access_test.rc != 0 or kubectl_test.rc != 0 %}PARA ACTIVAR INMEDIATAMENTE:{% endif %}"
-          - "{% if microk8s_access_test.rc != 0 or kubectl_test.rc != 0 %}sudo su - sysadmin{% endif %}"
-          - "{% if microk8s_access_test.rc != 0 or kubectl_test.rc != 0 %}source ~/.bashrc{% endif %}"
+          - "{% if microk8s_access_test.rc != 0 %}PARA ACTIVAR INMEDIATAMENTE:{% endif %}"
+          - "{% if microk8s_access_test.rc != 0 %}sudo su - sysadmin{% endif %}"
+          - "{% if microk8s_access_test.rc != 0 %}newgrp microk8s{% endif %}"
           - "========================================"
