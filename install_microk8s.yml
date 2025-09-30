@@ -13,13 +13,7 @@
         group: "{{ ansible_user_id }}"
       when: ansible_user_id != 'root'
 
-    - name: Cambiar propietario de ~/.kube recursivamente
-      ansible.builtin.file:
-        path: "/home/{{ ansible_user_id }}/.kube"
-        owner: "{{ ansible_user_id }}"
-        group: "{{ ansible_user_id }}"
-        recurse: yes
-      when: ansible_user_id != 'root'
+
 
     - name: Asegurarse de que snapd está instalado
       ansible.builtin.apt:
@@ -71,11 +65,19 @@
       ansible.builtin.command: /usr/bin/snap install microk8s --classic
       when: microk8s_list.rc != 0
 
-    - name: Agregar usuario actual al grupo microk8s
+    - name: Agregar usuario actual al grupo microk8s (equivalente a usermod -a -G microk8s usuario)
       ansible.builtin.user:
         name: "{{ ansible_user_id }}"
         groups: microk8s
         append: yes
+
+    - name: Cambiar propietario de ~/.kube al usuario actual (equivalente a chown -R usuario ~/.kube)
+      ansible.builtin.file:
+        path: "/home/{{ ansible_user_id }}/.kube"
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+        recurse: yes
+      when: ansible_user_id != 'root'
 
     - name: Asegurar que /snap/bin esté en el PATH del usuario actual
       ansible.builtin.lineinfile:
@@ -83,6 +85,16 @@
         regexp: '^export PATH=.*/snap/bin.*'
         line: 'export PATH="$PATH:/snap/bin"'
         insertafter: EOF
+      become: false
+      when: ansible_user_id != 'root'
+
+    - name: Crear alias kubectl para microk8s en ~/.bashrc
+      ansible.builtin.lineinfile:
+        path: "/home/{{ ansible_user_id }}/.bashrc"
+        regexp: "^alias kubectl='microk8s kubectl'"
+        line: "alias kubectl='microk8s kubectl'"
+        insertafter: EOF
+        create: yes
       become: false
       when: ansible_user_id != 'root'
 
