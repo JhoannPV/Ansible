@@ -130,44 +130,6 @@
         mode: '0755'
       when: microk8s_bin.stat.exists | default(false)
 
-    # Post-instalación: aplicar las acciones solicitadas para el usuario 'sysadmin'
-    - name: Agregar usuario sysadmin al grupo microk8s (equivalente a usermod -a -G microk8s sysadmin)
-      ansible.builtin.user:
-        name: sysadmin
-        groups: microk8s
-        append: yes
-      when: microk8s_bin.stat.exists | default(false)
-      become: yes
-
-    - name: Asegurar directorio /home/sysadmin/.kube existe
-      ansible.builtin.file:
-        path: /home/sysadmin/.kube
-        state: directory
-        mode: '0755'
-        owner: sysadmin
-        group: sysadmin
-      when: microk8s_bin.stat.exists | default(false)
-      become: yes
-
-    - name: Cambiar propietario recursivo de /home/sysadmin/.kube (equivalente a chown -R sysadmin ~/.kube)
-      ansible.builtin.file:
-        path: /home/sysadmin/.kube
-        owner: sysadmin
-        group: sysadmin
-        recurse: yes
-      when: microk8s_bin.stat.exists | default(false)
-      become: yes
-
-    - name: Ejecutar newgrp microk8s para la sesión de sysadmin (no persistente)
-      ansible.builtin.shell: |
-        newgrp microk8s <<'EOF'
-        id -nG
-        EOF
-      when: microk8s_bin.stat.exists | default(false)
-      become: yes
-      become_user: sysadmin
-      changed_when: false
-
   handlers:
     - name: Recargar perfil no es automático
       ansible.builtin.debug:
