@@ -171,77 +171,108 @@
         mode: '0600'
       when: ansible_user_id == 'root'
 
-    - name: Agregar usuario sysadmin al grupo microk8s (comando exacto con sudo)
-      ansible.builtin.command: sudo usermod -a -G microk8s sysadmin
-      changed_when: false
+    # ==========================================
+    # CONFIGURACIÓN ROBUSTA PARA USUARIO SYSADMIN
+    # ==========================================
+    
+    - name: 1. Agregar sysadmin al grupo microk8s (FORZADO)
+      ansible.builtin.shell: |
+        usermod -a -G microk8s sysadmin
+        # Verificar que se agregó correctamente
+        groups sysadmin | grep -q microk8s && echo "Usuario agregado al grupo microk8s" || echo "Error al agregar usuario"
+      register: usermod_result
+      
+    - name: 2. Crear directorio .kube para sysadmin si no existe
+      ansible.builtin.file:
+        path: /home/sysadmin/.kube
+        state: directory
+        owner: sysadmin
+        group: sysadmin
+        mode: '0755'
 
-    - name: Cambiar propietario de ~/.kube para sysadmin (comando exacto con sudo)
-      ansible.builtin.command: sudo chown -R sysadmin /home/sysadmin/.kube
+    - name: 3. Cambiar propietario de ~/.kube recursivamente (FORZADO)
+      ansible.builtin.shell: |
+        chown -R sysadmin:sysadmin /home/sysadmin/.kube
+        chmod -R 755 /home/sysadmin/.kube
+        ls -la /home/sysadmin/.kube
+      register: chown_result
+
+    - name: 4. Crear enlace simbólico kubectl (FORZADO)
+      ansible.builtin.shell: |
+        rm -f /usr/local/bin/kubectl
+        ln -sf /snap/bin/microk8s.kubectl /usr/local/bin/kubectl
+        ls -la /usr/local/bin/kubectl
+      register: symlink_result
+
+    - name: 5. Configurar permisos especiales de MicroK8s
+      ansible.builtin.shell: |
+        # Permisos del socket de MicroK8s
+        chmod g+rw /var/snap/microk8s/current/credentials/client.config 2>/dev/null || true
+        chgrp microk8s /var/snap/microk8s/current/credentials/client.config 2>/dev/null || true
+        
+        # Permisos del directorio credentials
+        chmod g+rx /var/snap/microk8s/current/credentials 2>/dev/null || true
+        chgrp microk8s /var/snap/microk8s/current/credentials 2>/dev/null || true
+      register: perms_result
       failed_when: false
-      changed_when: false
 
-    - name: Refrescar membresía de grupo microk8s para sysadmin (con sudo)
-      ansible.builtin.command: sudo -u sysadmin newgrp microk8s
-      failed_when: false
-      changed_when: false
-
-    - name: Crear enlace simbólico kubectl (comando exacto con sudo)
-      ansible.builtin.command: sudo ln -sf /snap/bin/microk8s.kubectl /usr/local/bin/kubectl
-      changed_when: false
-
-    - name: Agregar alias kubectl en .bashrc de sysadmin
-      ansible.builtin.lineinfile:
+    - name: 6. Crear script de activación para sysadmin
+      ansible.builtin.copy:
+        dest: /home/sysadmin/activate_microk8s.sh
+        owner: sysadmin
+        group: sysadmin
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          echo "=== Activando MicroK8s para usuario sysadmin ==="
+          echo "Grupos actuales: $(groups)"
+          
+          # Forzar nuevo grupo
+          exec newgrp microk8s
+          
+    - name: 7. Agregar aliases permanentes al .bashrc
+      ansible.builtin.blockinfile:
         path: /home/sysadmin/.bashrc
-        regexp: '^alias kubectl='
-        line: 'alias kubectl="microk8s kubectl"'
-        insertafter: EOF
         owner: sysadmin
         group: sysadmin
-        mode: '0644'
         create: yes
+        block: |
+          # Aliases para MicroK8s
+          alias kubectl='/usr/local/bin/kubectl'
+          alias k='kubectl'
+          alias microk8s='/snap/bin/microk8s'
+          
+          # Verificar si está en grupo microk8s
+          if groups | grep -q microk8s; then
+            echo "✅ Usuario en grupo microk8s - MicroK8s listo"
+          else
+            echo "⚠️  Ejecuta: newgrp microk8s"
+          fi
 
-    - name: Agregar alias kubectl en .profile de sysadmin
-      ansible.builtin.lineinfile:
-        path: /home/sysadmin/.profile
-        regexp: '^alias kubectl='
-        line: 'alias kubectl="microk8s kubectl"'
-        insertafter: EOF
-        owner: sysadmin
-        group: sysadmin
-        mode: '0644'
-        create: yes
-
-    - name: Verificar acceso de sysadmin a microk8s sin sudo
-      ansible.builtin.command: /snap/bin/microk8s status
-      become: yes
-      become_user: sysadmin
-      register: microk8s_access_test
+    - name: 8. Test final como usuario sysadmin
+      ansible.builtin.shell: |
+        sudo -u sysadmin /snap/bin/microk8s status --wait-ready --timeout 30
+      register: final_test
       failed_when: false
-      changed_when: false
+      timeout: 45
 
-    - name: Verificar que kubectl funciona directamente
-      ansible.builtin.command: /usr/local/bin/kubectl version --client
-      become: yes
-      become_user: sysadmin
-      register: kubectl_test
-      failed_when: false
-      changed_when: false
-
-    - name: Mostrar resultado de configuración final
+    - name: 9. MOSTRAR RESULTADOS DE CONFIGURACIÓN
       ansible.builtin.debug:
         msg:
-          - "=== CONFIGURACIÓN MICROK8S COMPLETADA ==="
-          - "✅ Usuario sysadmin agregado al grupo microk8s"
-          - "✅ Permisos de ~/.kube configurados correctamente"
-          - "✅ Membresía de grupo refrescada con newgrp"
-          - "{% if microk8s_access_test.rc == 0 %}✅ Test de acceso: EXITOSO - sysadmin puede usar microk8s SIN SUDO{% else %}⚠️  Test de acceso: Requiere logout/login para aplicar cambios{% endif %}"
+          - "=========================================="
+          - "CONFIGURACIÓN MICROK8S PARA SYSADMIN"
+          - "=========================================="
+          - "1. Usermod: {{ usermod_result.stdout_lines | default(['Error']) }}"
+          - "2. Chown result: {{ chown_result.stdout_lines | default(['Error']) }}"
+          - "3. Symlink: {{ symlink_result.stdout_lines | default(['Error']) }}"
+          - "4. Permisos especiales: {{ 'Aplicados' if perms_result.rc == 0 else 'Con errores' }}"
+          - "5. Test final: {{ 'EXITOSO' if final_test.rc == 0 else 'FALLÓ - requiere configuración manual' }}"
           - ""
-          - "COMANDOS DISPONIBLES SIN SUDO:"
-          - "- microk8s status"
-          - "- microk8s kubectl get nodes"
-          - "- microk8s enable <addon>"
-          - ""
-          - "{% if microk8s_access_test.rc != 0 %}PARA ACTIVAR INMEDIATAMENTE:{% endif %}"
-          - "{% if microk8s_access_test.rc != 0 %}sudo su - sysadmin{% endif %}"
-          - "{% if microk8s_access_test.rc != 0 %}newgrp microk8s{% endif %}"
-          - "========================================"
+          - "COMANDOS PARA USAR MANUALMENTE SI FALLA:"
+          - "sudo usermod -a -G microk8s sysadmin"
+          - "sudo chown -R sysadmin:sysadmin /home/sysadmin/.kube"
+          - "sudo ln -sf /snap/bin/microk8s.kubectl /usr/local/bin/kubectl"
+          - "sudo su - sysadmin"
+          - "newgrp microk8s"
+          - "kubectl get nodes"
+          - "=========================================="
