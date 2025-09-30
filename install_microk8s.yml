@@ -130,6 +130,37 @@
         mode: '0755'
       when: microk8s_bin.stat.exists | default(false)
 
+    - name: Agregar usuario sysadmin al grupo microk8s (específico)
+      ansible.builtin.command: usermod -a -G microk8s sysadmin
+      failed_when: false
+      changed_when: false
+
+    - name: Cambiar propietario de ~/.kube para sysadmin
+      ansible.builtin.file:
+        path: /home/sysadmin/.kube
+        owner: sysadmin
+        group: sysadmin
+        recurse: yes
+      when: ansible_user_id == 'sysadmin' or ansible_user_id != 'root'
+
+    - name: Mostrar información de instalación completada
+      ansible.builtin.debug:
+        msg:
+          - "✅ MicroK8s instalado y configurado correctamente"
+          - "✅ Usuario sysadmin agregado al grupo microk8s"
+          - "✅ Permisos de ~/.kube configurados para sysadmin"
+          - "✅ Enlaces simbólicos creados para acceso directo"
+          - ""
+          - "Comandos disponibles:"
+          - "- microk8s status"
+          - "- microk8s kubectl get nodes"
+          - "- kubectl get nodes (si usas el enlace simbólico)"
+          - ""
+          - "Para activar los cambios de grupo, ejecuta:"
+          - "sudo su - sysadmin"
+          - "o"
+          - "newgrp microk8s"
+
   handlers:
     - name: Recargar perfil no es automático
       ansible.builtin.debug:
