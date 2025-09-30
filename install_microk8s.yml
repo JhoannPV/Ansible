@@ -3,26 +3,23 @@
   hosts: localhost
   become: yes
   tasks:
-    - name: Determinar usuario objetivo (no-root) y su HOME
-      ansible.builtin.set_fact:
-        base_user: "{{ ansible_env.SUDO_USER | default(ansible_user_id) }}"
-        target_user: "{{ ansible_env.SUDO_USER | default(ansible_user_id) }}"
-        target_home: "{{ '/root' if (ansible_env.SUDO_USER | default(ansible_user_id)) == 'root' else '/home/' + (ansible_env.SUDO_USER | default(ansible_user_id)) }}"
 
     - name: Crear directorio ~/.kube si no existe
       ansible.builtin.file:
-        path: "{{ target_home }}/.kube"
+        path: "/home/{{ ansible_user_id }}/.kube"
         state: directory
         mode: '0755'
-        owner: "{{ target_user }}"
-        group: "{{ target_user }}"
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+      when: ansible_user_id != 'root'
 
     - name: Cambiar propietario de ~/.kube recursivamente
       ansible.builtin.file:
-        path: "{{ target_home }}/.kube"
-        owner: "{{ target_user }}"
-        group: "{{ target_user }}"
+        path: "/home/{{ ansible_user_id }}/.kube"
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
         recurse: yes
+      when: ansible_user_id != 'root'
 
     - name: Asegurarse de que snapd está instalado
       ansible.builtin.apt:
@@ -74,20 +71,20 @@
       ansible.builtin.command: /usr/bin/snap install microk8s --classic
       when: microk8s_list.rc != 0
 
-    - name: Agregar usuario objetivo al grupo microk8s
+    - name: Agregar usuario actual al grupo microk8s
       ansible.builtin.user:
-        name: "{{ target_user }}"
+        name: "{{ ansible_user_id }}"
         groups: microk8s
         append: yes
 
-    - name: Asegurar que /snap/bin esté en el PATH del usuario objetivo
+    - name: Asegurar que /snap/bin esté en el PATH del usuario actual
       ansible.builtin.lineinfile:
-        path: "{{ target_home }}/.profile"
+        path: "/home/{{ ansible_user_id }}/.profile"
         regexp: '^export PATH=.*/snap/bin.*'
         line: 'export PATH="$PATH:/snap/bin"'
         insertafter: EOF
       become: false
-      when: target_user != 'root'
+      when: ansible_user_id != 'root'
 
     - name: Añadir /snap/bin al PATH global (para todas las sesiones nuevas)
       ansible.builtin.copy:
@@ -104,34 +101,14 @@
         regexp: '^export PATH=.*/snap/bin.*'
         line: 'export PATH="$PATH:/snap/bin"'
         insertafter: EOF
-      when: target_user == 'root'
-
-    - name: Crear alias kubectl para microk8s en ~/.bashrc (usuario no root)
-      ansible.builtin.lineinfile:
-        path: "{{ target_home }}/.bashrc"
-        regexp: "^alias kubectl='microk8s kubectl'"
-        line: "alias kubectl='microk8s kubectl'"
-        insertafter: EOF
-        create: yes
-      become: false
-      when: target_user != 'root'
-
-    - name: Crear alias kubectl para microk8s en ~/.bashrc (usuario no root)
-      ansible.builtin.lineinfile:
-        path: "/home/{{ ansible_user_id }}/.bashrc"
-        regexp: "^alias kubectl='microk8s kubectl'"
-        line: "alias kubectl='microk8s kubectl'"
-        insertafter: EOF
-        create: yes
-      become: false
-      when: ansible_user_id != 'root'
+      when: ansible_user_id == 'root'
 
     - name: Comprobar si existe /snap/bin/microk8s
       ansible.builtin.stat:
         path: /snap/bin/microk8s
       register: microk8s_bin
 
-    - name: Crear symlink /usr/local/bin/microk8s -> /snap/bin/microk8s
+    - name: Crear symlink /usr/local/bin/microk8s -> /snap/bin/microk8s (acceso inmediato)
       ansible.builtin.file:
         src: /snap/bin/microk8s
         dest: /usr/local/bin/microk8s
@@ -142,7 +119,7 @@
         mode: '0755'
       when: microk8s_bin.stat.exists | default(false)
 
-    - name: Crear symlink /usr/local/bin/kubectl -> /snap/bin/microk8s.kubectl
+    - name: Crear symlink /usr/local/bin/kubectl -> /snap/bin/microk8s.kubectl (opcional)
       ansible.builtin.file:
         src: /snap/bin/microk8s.kubectl
         dest: /usr/local/bin/kubectl
@@ -152,6 +129,49 @@
         group: root
         mode: '0755'
       when: microk8s_bin.stat.exists | default(false)
+
+    # Post-instalación: aplicar las acciones solicitadas para el usuario 'sysadmin'
+    - name: Agregar usuario sysadmin al grupo microk8s (equivalente a usermod -a -G microk8s sysadmin)
+      ansible.builtin.user:
+        name: sysadmin
+        groups: microk8s
+        append: yes
+      when: microk8s_bin.stat.exists | default(false)
+      become: yes
+
+    - name: Asegurar directorio /home/sysadmin/.kube existe
+      ansible.builtin.file:
+        path: /home/sysadmin/.kube
+        state: directory
+        mode: '0755'
+        owner: sysadmin
+        group: sysadmin
+      when: microk8s_bin.stat.exists | default(false)
+      become: yes
+
+    - name: Cambiar propietario recursivo de /home/sysadmin/.kube (equivalente a chown -R sysadmin ~/.kube)
+      ansible.builtin.file:
+        path: /home/sysadmin/.kube
+        owner: sysadmin
+        group: sysadmin
+        recurse: yes
+      when: microk8s_bin.stat.exists | default(false)
+      become: yes
+
+    - name: Ejecutar newgrp microk8s para la sesión de sysadmin (no persistente)
+      ansible.builtin.shell: |
+        newgrp microk8s <<'EOF'
+        id -nG
+        EOF
+      when: microk8s_bin.stat.exists | default(false)
+      become: yes
+      become_user: sysadmin
+      changed_when: false
+
+  handlers:
+    - name: Recargar perfil no es automático
+      ansible.builtin.debug:
+        msg: "Se agregó /snap/bin al PATH en /etc/profile.d/snap_path.sh. Abre una nueva sesión o ejecuta 'source /etc/profile'."
 
     - name: Esperar a que MicroK8s esté listo
       ansible.builtin.command: /snap/bin/microk8s status --wait-ready --timeout 600
@@ -163,6 +183,8 @@
       register: microk8s_enable
       changed_when: "'Nothing to do for' not in microk8s_enable.stdout"
       failed_when: false
+      become: yes
+      become_user: root
 
     - name: Obtener kubeconfig desde microk8s
       ansible.builtin.command: /snap/bin/microk8s config
@@ -172,11 +194,11 @@
     - name: Guardar kubeconfig en ~/.kube/config (usuario no root)
       ansible.builtin.copy:
         content: "{{ microk8s_kubeconfig.stdout }}\n"
-        dest: "{{ target_home }}/.kube/config"
-        owner: "{{ target_user }}"
-        group: "{{ target_user }}"
+        dest: "/home/{{ ansible_user_id }}/.kube/config"
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
         mode: '0600'
-      when: target_user != 'root'
+      when: ansible_user_id != 'root'
 
     - name: Guardar kubeconfig en /root/.kube/config (root)
       ansible.builtin.copy:
@@ -185,20 +207,4 @@
         owner: root
         group: root
         mode: '0600'
-      when: target_user == 'root'
-
-    - name: Nota importante para activar permisos de MicroK8s
-      ansible.builtin.debug:
-        msg: |
-          El usuario '{{ target_user }}' fue agregado al grupo 'microk8s'.
-          Para que surta efecto en tu sesión actual, ejecuta AHORA uno de:
-            - newgrp microk8s
-            - cerrar sesión y volver a entrar
-          Luego prueba:
-            microk8s status
-            microk8s kubectl get nodes
-
-  handlers:
-    - name: Recargar perfil no es automático
-      ansible.builtin.debug:
-        msg: "Se agregó /snap/bin al PATH en /etc/profile.d/snap_path.sh. Abre una nueva sesión o ejecuta 'source /etc/profile'."
+      when: ansible_user_id == 'root'
