@@ -199,6 +199,15 @@
         owner: root
         group: root
 
+    - name: Ejecutar usermod para agregar sysadmin al grupo microk8s (comando exacto)
+      ansible.builtin.command: usermod -a -G microk8s sysadmin
+      changed_when: false
+
+    - name: Cambiar propietario de ~/.kube para sysadmin (comando exacto)
+      ansible.builtin.command: chown -R sysadmin /home/sysadmin/.kube
+      failed_when: false
+      changed_when: false
+
     - name: Crear wrapper script para microk8s kubectl
       ansible.builtin.copy:
         dest: /usr/local/bin/kubectl-microk8s
