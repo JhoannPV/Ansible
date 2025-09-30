@@ -79,6 +79,99 @@
         recurse: yes
       when: ansible_user_id != 'root'
 
+    - name: Esperar a que MicroK8s esté completamente listo
+      ansible.builtin.command: /snap/bin/microk8s status --wait-ready --timeout 120
+      register: microk8s_ready
+      changed_when: false
+
+    - name: Habilitar complementos básicos de MicroK8s
+      ansible.builtin.command: /snap/bin/microk8s enable dns storage
+      register: microk8s_enable
+      changed_when: "'Nothing to do for' not in microk8s_enable.stdout"
+      failed_when: false
+
+    - name: Obtener kubeconfig desde microk8s
+      ansible.builtin.command: /snap/bin/microk8s config
+      register: microk8s_kubeconfig
+      changed_when: false
+
+    - name: Guardar kubeconfig en ~/.kube/config (usuario no root)
+      ansible.builtin.copy:
+        content: "{{ microk8s_kubeconfig.stdout }}\n"
+        dest: "/home/{{ ansible_user_id }}/.kube/config"
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+        mode: '0600'
+      when: ansible_user_id != 'root'
+
+    - name: Guardar kubeconfig en /root/.kube/config (root)
+      ansible.builtin.copy:
+        content: "{{ microk8s_kubeconfig.stdout }}\n"
+        dest: "/root/.kube/config"
+        owner: root
+        group: root
+        mode: '0600'
+      when: ansible_user_id == 'root'
+
+    - name: Verificar permisos de MicroK8s para el usuario
+      ansible.builtin.shell: |
+        sg microk8s -c "/snap/bin/microk8s kubectl get nodes" 2>/dev/null || echo "NEEDS_RELOAD"
+      become: yes
+      become_user: "{{ ansible_user_id }}"
+      register: microk8s_permission_test
+      changed_when: false
+      when: ansible_user_id != 'root'
+
+    - name: Crear script para activar MicroK8s sin reiniciar sesión
+      ansible.builtin.copy:
+        dest: "/home/{{ ansible_user_id }}/reload_microk8s_groups.sh"
+        content: |
+          #!/bin/bash
+          echo "🔧 Recargando grupos de MicroK8s para el usuario {{ ansible_user_id }}..."
+          echo "💡 Ejecutando: newgrp microk8s"
+          echo "✅ Después de esto podrás usar 'kubectl' o 'microk8s kubectl'"
+          echo ""
+          exec newgrp microk8s
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+        mode: '0755'
+      when: ansible_user_id != 'root'
+
+    - name: Mostrar estado final de la instalación
+      ansible.builtin.debug:
+        msg: |
+          🎉 ¡MicroK8s instalado correctamente!
+          
+          📋 ESTADO DE PERMISOS:
+          {% if ansible_user_id != 'root' %}
+          {% if 'NEEDS_RELOAD' in microk8s_permission_test.stdout %}
+          ⚠️  Necesitas recargar los grupos del usuario
+          
+          🔧 SOLUCIONES (elige una):
+          
+          1️⃣ Ejecutar script automático:
+             ./reload_microk8s_groups.sh
+          
+          2️⃣ Comando manual:
+             newgrp microk8s
+          
+          3️⃣ Reiniciar sesión:
+             Cierra sesión y vuelve a entrar
+          
+          ✅ Después podrás usar:
+             kubectl get nodes
+             microk8s kubectl get nodes
+          {% else %}
+          ✅ Los permisos están configurados correctamente
+          ✅ Puedes usar kubectl directamente
+          {% endif %}
+          {% else %}
+          ✅ Instalación como root completada
+          {% endif %}
+          
+          🌐 Para acceder desde otros nodos:
+             microk8s config > kubeconfig.yaml
+
     - name: Asegurar que /snap/bin esté en el PATH del usuario actual
       ansible.builtin.lineinfile:
         path: "/home/{{ ansible_user_id }}/.profile"
@@ -97,6 +190,8 @@
         create: yes
       become: false
       when: ansible_user_id != 'root'
+
+
 
     - name: Añadir /snap/bin al PATH global (para todas las sesiones nuevas)
       ansible.builtin.copy:
@@ -146,39 +241,3 @@
     - name: Recargar perfil no es automático
       ansible.builtin.debug:
         msg: "Se agregó /snap/bin al PATH en /etc/profile.d/snap_path.sh. Abre una nueva sesión o ejecuta 'source /etc/profile'."
-
-    - name: Esperar a que MicroK8s esté listo
-      ansible.builtin.command: /snap/bin/microk8s status --wait-ready --timeout 600
-      register: microk8s_ready
-      changed_when: false
-
-    - name: Habilitar complementos básicos de MicroK8s (opcional)
-      ansible.builtin.command: /snap/bin/microk8s enable dns storage
-      register: microk8s_enable
-      changed_when: "'Nothing to do for' not in microk8s_enable.stdout"
-      failed_when: false
-      become: yes
-      become_user: root
-
-    - name: Obtener kubeconfig desde microk8s
-      ansible.builtin.command: /snap/bin/microk8s config
-      register: microk8s_kubeconfig
-      changed_when: false
-
-    - name: Guardar kubeconfig en ~/.kube/config (usuario no root)
-      ansible.builtin.copy:
-        content: "{{ microk8s_kubeconfig.stdout }}\n"
-        dest: "/home/{{ ansible_user_id }}/.kube/config"
-        owner: "{{ ansible_user_id }}"
-        group: "{{ ansible_user_id }}"
-        mode: '0600'
-      when: ansible_user_id != 'root'
-
-    - name: Guardar kubeconfig en /root/.kube/config (root)
-      ansible.builtin.copy:
-        content: "{{ microk8s_kubeconfig.stdout }}\n"
-        dest: "/root/.kube/config"
-        owner: root
-        group: root
-        mode: '0600'
-      when: ansible_user_id == 'root'
