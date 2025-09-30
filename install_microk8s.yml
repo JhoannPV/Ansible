@@ -1,6 +1,6 @@
 ---
-- name: Instalar MicroK8s en Ubuntu
-  hosts: all
+- name: Instalar MicroK8s en Ubuntu/Debian
+  hosts: localhost
   become: yes
   tasks:
 
@@ -20,7 +20,7 @@
         group: "{{ ansible_user_id }}"
         recurse: yes
       when: ansible_user_id != 'root'
-      
+
     - name: Asegurarse de que snapd está instalado
       ansible.builtin.apt:
         name: snapd
@@ -28,33 +28,48 @@
         update_cache: yes
       when: ansible_os_family == "Debian"
 
-    - name: Instalar MicroK8s
-      community.general.snap:
-        name: microk8s
-        classic: yes
-        state: present
-
-    - name: Agregar clave GPG del repositorio de Kubernetes
-      ansible.builtin.apt_key:
-        url: https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key
-        keyring: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-        state: present
+    - name: Habilitar y arrancar snapd
+      ansible.builtin.service:
+        name: snapd
+        state: started
+        enabled: yes
       when: ansible_os_family == "Debian"
 
-    - name: Agregar repositorio de Kubernetes
-      ansible.builtin.apt_repository:
-        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /"
-        filename: kubernetes
-        state: present
-        update_cache: yes
+    - name: Comprobar existencia de /var/lib/snapd/snap
+      ansible.builtin.stat:
+        path: /var/lib/snapd/snap
+      register: snap_src
       when: ansible_os_family == "Debian"
 
-    - name: Instalar kubectl
-      ansible.builtin.apt:
-        name: kubectl
-        state: present
-        update_cache: yes
+    # Symlink se intentará crear después de instalar 'core'
+
+    - name: Comprobar si microk8s ya está instalado
+      ansible.builtin.command: /usr/bin/snap list microk8s
+      register: microk8s_list
+      failed_when: false
+      changed_when: false
+
+    - name: Instalar snap core si no está presente
+      ansible.builtin.command: /usr/bin/snap install core
+      when: microk8s_list.rc != 0
+
+    - name: Comprobar existencia de /var/lib/snapd/snap (post-core)
+      ansible.builtin.stat:
+        path: /var/lib/snapd/snap
+      register: snap_src_after
       when: ansible_os_family == "Debian"
+
+    - name: Asegurar symlink /snap -> /var/lib/snapd/snap (post-core)
+      ansible.builtin.file:
+        src: /var/lib/snapd/snap
+        dest: /snap
+        state: link
+        force: yes
+      when: ansible_os_family == "Debian" and snap_src_after.stat.exists | default(false)
+
+    - name: Instalar MicroK8s (classic) si no está presente
+      ansible.builtin.command: /usr/bin/snap install microk8s --classic
+      when: microk8s_list.rc != 0
 
     - name: Agregar usuario actual al grupo microk8s
       ansible.builtin.user:
@@ -71,47 +86,87 @@
       become: false
       when: ansible_user_id != 'root'
 
+    - name: Añadir /snap/bin al PATH global (para todas las sesiones nuevas)
+      ansible.builtin.copy:
+        dest: /etc/profile.d/snap_path.sh
+        content: 'export PATH="$PATH:/snap/bin"\n'
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Recargar perfil no es automático
+
+    - name: Asegurar PATH para root (opcional)
+      ansible.builtin.lineinfile:
+        path: /root/.profile
+        regexp: '^export PATH=.*/snap/bin.*'
+        line: 'export PATH="$PATH:/snap/bin"'
+        insertafter: EOF
+      when: ansible_user_id == 'root'
+
+    - name: Comprobar si existe /snap/bin/microk8s
+      ansible.builtin.stat:
+        path: /snap/bin/microk8s
+      register: microk8s_bin
+
+    - name: Crear symlink /usr/local/bin/microk8s -> /snap/bin/microk8s (acceso inmediato)
+      ansible.builtin.file:
+        src: /snap/bin/microk8s
+        dest: /usr/local/bin/microk8s
+        state: link
+        force: yes
+        owner: root
+        group: root
+        mode: '0755'
+      when: microk8s_bin.stat.exists | default(false)
+
+    - name: Crear symlink /usr/local/bin/kubectl -> /snap/bin/microk8s.kubectl (opcional)
+      ansible.builtin.file:
+        src: /snap/bin/microk8s.kubectl
+        dest: /usr/local/bin/kubectl
+        state: link
+        force: yes
+        owner: root
+        group: root
+        mode: '0755'
+      when: microk8s_bin.stat.exists | default(false)
+
+  handlers:
+    - name: Recargar perfil no es automático
+      ansible.builtin.debug:
+        msg: "Se agregó /snap/bin al PATH en /etc/profile.d/snap_path.sh. Abre una nueva sesión o ejecuta 'source /etc/profile'."
+
+    - name: Esperar a que MicroK8s esté listo
+      ansible.builtin.command: /snap/bin/microk8s status --wait-ready --timeout 600
+      register: microk8s_ready
+      changed_when: false
+
     - name: Habilitar complementos básicos de MicroK8s (opcional)
-      ansible.builtin.command: microk8s enable dns storage
+      ansible.builtin.command: /snap/bin/microk8s enable dns storage
       register: microk8s_enable
       changed_when: "'Nothing to do for' not in microk8s_enable.stdout"
       failed_when: false
       become: yes
       become_user: root
 
-    - name: Esperar a que MicroK8s esté listo
-      ansible.builtin.command: microk8s status --wait-ready
-      register: microk8s_status
+    - name: Obtener kubeconfig desde microk8s
+      ansible.builtin.command: /snap/bin/microk8s config
+      register: microk8s_kubeconfig
       changed_when: false
-      retries: 5
-      delay: 10
 
-    - name: Crear alias para kubectl en el perfil del usuario
-      ansible.builtin.lineinfile:
-        path: "/home/{{ ansible_user_id }}/.bashrc"
-        regexp: '^alias kubectl='
-        line: 'alias kubectl="microk8s kubectl"'
-        insertafter: EOF
-      become: false
+    - name: Guardar kubeconfig en ~/.kube/config (usuario no root)
+      ansible.builtin.copy:
+        content: "{{ microk8s_kubeconfig.stdout }}\n"
+        dest: "/home/{{ ansible_user_id }}/.kube/config"
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+        mode: '0600'
       when: ansible_user_id != 'root'
 
-    - name: Configurar kubeconfig para kubectl
-      ansible.builtin.shell: |
-        microk8s config > /home/{{ ansible_user_id }}/.kube/config
-        chown {{ ansible_user_id }}:{{ ansible_user_id }} /home/{{ ansible_user_id }}/.kube/config
-        chmod 600 /home/{{ ansible_user_id }}/.kube/config
-      when: ansible_user_id != 'root'
-
-    - name: Mostrar información de instalación
-      ansible.builtin.debug:
-        msg:
-          - "✅ MicroK8s y kubectl instalados correctamente"
-          - "✅ Usuario {{ ansible_user_id }} agregado al grupo microk8s"
-          - "✅ Kubeconfig configurado en ~/.kube/config"
-          - ""
-          - "Para usar kubectl después de la instalación:"
-          - "1. Reinicia tu sesión o ejecuta: newgrp microk8s"
-          - "2. Usa: kubectl get nodes"
-          - "3. O usa directamente: microk8s kubectl get nodes"
-          - ""
-          - "Complementos habilitados: dns, storage"
+    - name: Guardar kubeconfig en /root/.kube/config (root)
+      ansible.builtin.copy:
+        content: "{{ microk8s_kubeconfig.stdout }}\n"
+        dest: "/root/.kube/config"
+        owner: root
+        group: root
+        mode: '0600'
+      when: ansible_user_id == 'root'
