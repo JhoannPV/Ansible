@@ -154,6 +154,18 @@
         mode: '0644'
       when: ansible_user_id == 'root' and (microk8s_bin.stat.exists | default(false))
 
+    - name: Añadir alias kubectl para sysadmin en /home/sysadmin/.bashrc
+      ansible.builtin.lineinfile:
+        path: "/home/sysadmin/.bashrc"
+        regexp: "^alias kubectl='microk8s kubectl'$"
+        line: "alias kubectl='microk8s kubectl'"
+        create: yes
+        owner: sysadmin
+        group: sysadmin
+        mode: '0644'
+      when: microk8s_bin.stat.exists | default(false)
+      become: yes
+
   handlers:
     - name: Recargar perfil no es automático
       ansible.builtin.debug:
