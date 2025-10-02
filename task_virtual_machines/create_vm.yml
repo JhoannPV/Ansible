@@ -52,6 +52,12 @@
       --bridgeadapter1 {{ default_adapter.stdout }}
   when: vm.network == "bridged" and default_adapter.stdout != ""
 
+- name: "Configure host-only network adapter for VM '{{ vm.name }}'"
+  ansible.builtin.shell: |
+    VBoxManage modifyvm "{{ vm.name }}" \
+      --hostonlyadapter1 {{ default_vm_config.hostonly_interface | default('vboxnet0') }}
+  when: vm.network == "hostonly"
+
 - name: "Create disk for VM '{{ vm.name }}'"
   ansible.builtin.shell: |
     VBoxManage createmedium disk \
