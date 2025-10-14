@@ -168,8 +168,38 @@
     - name: Deploy Vault (dev mode)
       ansible.builtin.command: microk8s kubectl apply -f {{ manifests_path }}/vault/dev-vault.yaml
 
-    - name: Wait for Vault pod to be Ready
-      ansible.builtin.shell: microk8s kubectl -n vault rollout status deploy/vault --timeout=120s
+    - block:
+        - name: Wait for Vault deployment to be Ready (up to 5 minutes)
+          ansible.builtin.shell: microk8s kubectl -n vault rollout status deploy/vault --timeout=300s
+      rescue:
+        - name: Get Vault pods status
+          ansible.builtin.shell: microk8s kubectl -n vault get pods -o wide || true
+          register: vault_pods
+          changed_when: false
+        - ansible.builtin.debug:
+            var: vault_pods.stdout
+
+        - name: Describe Vault pod
+          ansible.builtin.shell: |
+            POD=$(microk8s kubectl -n vault get pods -l app=vault -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            if [ -n "$POD" ]; then microk8s kubectl -n vault describe pod "$POD"; else echo "No Vault pod found"; fi
+          register: vault_pod_desc
+          changed_when: false
+        - ansible.builtin.debug:
+            var: vault_pod_desc.stdout
+
+        - name: Show Vault pod logs (last 200 lines)
+          ansible.builtin.shell: |
+            POD=$(microk8s kubectl -n vault get pods -l app=vault -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            if [ -n "$POD" ]; then microk8s kubectl -n vault logs "$POD" --tail=200; else echo "No Vault pod found"; fi
+          register: vault_pod_logs
+          changed_when: false
+        - ansible.builtin.debug:
+            var: vault_pod_logs.stdout
+
+        - name: Fail due to Vault not ready
+          ansible.builtin.fail:
+            msg: "Vault did not become ready within the timeout. See pod status/describe/logs above."
 
     - name: Apply Vault Kubernetes auth RBAC
       ansible.builtin.command: microk8s kubectl apply -f {{ manifests_path }}/vault/k8s-auth-rbac.yaml
