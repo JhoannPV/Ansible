@@ -52,6 +52,28 @@
       ansible.builtin.shell: |
         microk8s helm3 upgrade --install external-secrets external-secrets/external-secrets -n external-secrets --create-namespace
 
+    - name: Wait for External Secrets CRDs to be installed
+      ansible.builtin.shell: microk8s kubectl get crd {{ item }}
+      register: es_crd_check
+      retries: 30
+      delay: 5
+      until: es_crd_check.rc == 0
+      changed_when: false
+      loop:
+        - externalsecrets.external-secrets.io
+        - secretstores.external-secrets.io
+        - clustersecretstores.external-secrets.io
+
+    - name: Get External Secrets deployments
+      ansible.builtin.shell: microk8s kubectl -n external-secrets get deploy -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'
+      register: es_deploys
+      changed_when: false
+
+    - name: Wait for External Secrets deployments to be Ready
+      ansible.builtin.shell: microk8s kubectl -n external-secrets rollout status deploy/{{ item }} --timeout=240s
+      loop: "{{ es_deploys.stdout_lines | default([]) }}"
+      when: es_deploys.stdout_lines is defined and es_deploys.stdout_lines | length > 0
+
     - name: Ensure manifests parent directory exists
       ansible.builtin.file:
         path: "{{ manifests_path }}"
@@ -210,11 +232,14 @@
     - name: Wait for vault-bootstrap job completion
       ansible.builtin.shell: microk8s kubectl -n vault wait --for=condition=complete --timeout=180s job/vault-bootstrap
 
-    - name: Apply app RBAC and SecretStore
-      ansible.builtin.shell: |
-        microk8s kubectl apply -f {{ manifests_path }}/calendar-app-rbac.yaml
-        microk8s kubectl apply -f {{ manifests_path }}/external-secrets/secret-store.yaml
-        microk8s kubectl apply -f {{ manifests_path }}/external-secrets/app-secrets.yaml
+    - name: Apply app RBAC
+      ansible.builtin.shell: microk8s kubectl apply -f {{ manifests_path }}/calendar-app-rbac.yaml
+
+    - name: Apply SecretStore (requires ESO CRDs)
+      ansible.builtin.shell: microk8s kubectl apply -f {{ manifests_path }}/external-secrets/secret-store.yaml
+
+    - name: Apply ExternalSecrets (requires ESO CRDs)
+      ansible.builtin.shell: microk8s kubectl apply -f {{ manifests_path }}/external-secrets/app-secrets.yaml
 
     - name: Deploy MongoDB, Backend, Frontend and services
       ansible.builtin.shell: |
