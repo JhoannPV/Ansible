@@ -6,7 +6,7 @@
     manifests_repo: "https://github.com/JhoannPV/k8s-manifests.git"
     manifests_branch: "main"
     manifests_path: "/home/sysadmin/k8s-manifests"
-    metallb_cidr: "192.168.101.240-192.168.101.250"
+    metallb_cidr: "192.168.1.240-192.168.1.250"
 
   pre_tasks:
     - name: Ensure MicroK8s is installed
