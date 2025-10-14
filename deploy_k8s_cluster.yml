@@ -69,8 +69,11 @@
         force: yes
       become_user: sysadmin
 
-    - name: Apply namespaces
-      ansible.builtin.command: microk8s kubectl apply -f {{ manifests_path }}/namespaces.yaml
+    - name: Ensure required namespaces exist (calendar-app, vault)
+      ansible.builtin.shell: |
+        microk8s kubectl get ns calendar-app >/dev/null 2>&1 || microk8s kubectl create ns calendar-app
+        microk8s kubectl get ns vault >/dev/null 2>&1 || microk8s kubectl create ns vault
+      changed_when: false
 
     - name: Configure MetalLB address pool (inline)
       ansible.builtin.shell: |
