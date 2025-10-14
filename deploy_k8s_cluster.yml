@@ -69,6 +69,21 @@
         force: yes
       become_user: sysadmin
 
+    - name: Verify Vault manifest files exist
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ manifests_path }}/vault/dev-vault.yaml"
+        - "{{ manifests_path }}/vault/bootstrap.yaml"
+        - "{{ manifests_path }}/vault/k8s-auth-rbac.yaml"
+      register: vault_manifest_stats
+
+    - name: Fail if any Vault manifest file is missing
+      ansible.builtin.fail:
+        msg: "Required Vault manifest file is missing: {{ item.stat.path }}"
+      loop: "{{ vault_manifest_stats.results }}"
+      when: not item.stat.exists
+
     - name: Ensure required namespaces exist (calendar-app, vault)
       ansible.builtin.shell: |
         microk8s kubectl get ns calendar-app >/dev/null 2>&1 || microk8s kubectl create ns calendar-app
@@ -186,6 +201,13 @@
         microk8s kubectl -n calendar-app rollout status deploy/calendar-frontend --timeout=180s
 
   post_tasks:
+    - name: Show resources in vault namespace (for debugging)
+      ansible.builtin.shell: |
+        microk8s kubectl -n vault get all || true
+      register: vault_ns_resources
+      changed_when: false
+    - ansible.builtin.debug:
+        var: vault_ns_resources.stdout
     - name: Show service addresses
       ansible.builtin.shell: |
         microk8s kubectl -n calendar-app get svc
