@@ -78,14 +78,14 @@
       loop: "{{ es_deploys.stdout_lines | default([]) }}"
       when: es_deploys.stdout_lines is defined and es_deploys.stdout_lines | length > 0
 
-    - name: Detect External Secrets API version (SecretStore CRD)
-      ansible.builtin.shell: microk8s kubectl get crd secretstores.external-secrets.io -o jsonpath='{.spec.versions[?(@.storage)].name}'
-      register: eso_api_ver
+    - name: Detect External Secrets API version (from api-resources)
+      ansible.builtin.shell: microk8s kubectl api-resources --api-group=external-secrets.io | awk '/^secretstores\b/ {print $3; exit}'
+      register: eso_api_ver_str
       changed_when: false
 
     - name: Set External Secrets API version fact
       ansible.builtin.set_fact:
-        eso_api_version: "{{ (eso_api_ver.stdout | trim) if (eso_api_ver.stdout | trim) else 'v1beta1' }}"
+        eso_api_version: "{{ (eso_api_ver_str.stdout | trim | split('/') | last) if (eso_api_ver_str.stdout | trim) else 'v1' }}"
 
     - name: Ensure manifests parent directory exists
       ansible.builtin.file:
