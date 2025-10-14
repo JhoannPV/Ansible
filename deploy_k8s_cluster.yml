@@ -75,31 +75,38 @@
         microk8s kubectl get ns vault >/dev/null 2>&1 || microk8s kubectl create ns vault
       changed_when: false
 
-    - name: Configure MetalLB address pool (idempotent)
+    - name: Check if MetalLB IPAddressPool exists
+      ansible.builtin.shell: microk8s kubectl -n metallb-system get ipaddresspool default-address-pool
+      register: metallb_pool_check
+      failed_when: false
+      changed_when: false
+
+    - name: Create MetalLB IPAddressPool if missing
       ansible.builtin.shell: |
-        if ! microk8s kubectl -n metallb-system get ipaddresspool default-address-pool >/dev/null 2>&1; then
-          cat <<YAML | microk8s kubectl apply -f -
-          apiVersion: metallb.io/v1beta1
-          kind: IPAddressPool
-          metadata:
-            name: default-address-pool
-            namespace: metallb-system
-          spec:
-            addresses:
-              - {{ metallb_cidr }}
-          ---
-          apiVersion: metallb.io/v1beta1
-          kind: L2Advertisement
-          metadata:
-            name: l2adv
-            namespace: metallb-system
-          spec:
-            ipAddressPools:
-              - default-address-pool
-          YAML
-        else
-          echo "IPAddressPool default-address-pool already exists, skipping."
-        fi
+        cat <<'YAML' | microk8s kubectl apply -f -
+        apiVersion: metallb.io/v1beta1
+        kind: IPAddressPool
+        metadata:
+          name: default-address-pool
+          namespace: metallb-system
+        spec:
+          addresses:
+            - {{ metallb_cidr }}
+        YAML
+      when: metallb_pool_check.rc != 0
+
+    - name: Ensure MetalLB L2Advertisement exists
+      ansible.builtin.shell: |
+        cat <<'YAML' | microk8s kubectl apply -f -
+        apiVersion: metallb.io/v1beta1
+        kind: L2Advertisement
+        metadata:
+          name: l2adv
+          namespace: metallb-system
+        spec:
+          ipAddressPools:
+            - default-address-pool
+        YAML
       changed_when: false
 
     - name: Expose MicroK8s ingress controller via LoadBalancer (MetalLB)
