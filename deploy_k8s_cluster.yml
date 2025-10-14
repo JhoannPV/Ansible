@@ -48,15 +48,9 @@
         microk8s helm3 repo add external-secrets https://charts.external-secrets.io
         microk8s helm3 repo update
 
-    - name: Install External Secrets CRDs (idempotent)
-      ansible.builtin.shell: |
-        microk8s kubectl apply -f https://raw.githubusercontent.com/external-secrets/external-secrets/main/deploy/crds/bundle.yaml
-      register: es_crd_apply
-      changed_when: "'configured' in es_crd_apply.stdout or 'created' in es_crd_apply.stdout or 'unchanged' in es_crd_apply.stdout"
-
     - name: Install External Secrets Operator chart (helm3)
       ansible.builtin.shell: |
-        microk8s helm3 upgrade --install external-secrets external-secrets/external-secrets -n external-secrets --create-namespace
+        microk8s helm3 upgrade --install external-secrets external-secrets/external-secrets -n external-secrets --create-namespace --set installCRDs=true
 
     - name: Wait for External Secrets API group to be discoverable (SecretStore)
       ansible.builtin.shell: microk8s kubectl api-resources --api-group=external-secrets.io | grep -q "^secretstores\b"
