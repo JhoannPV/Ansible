@@ -79,7 +79,7 @@
       when: es_deploys.stdout_lines is defined and es_deploys.stdout_lines | length > 0
 
     - name: Detect External Secrets API version (SecretStore CRD)
-      ansible.builtin.shell: microk8s kubectl get crd secretstores.external-secrets.io -o jsonpath='{.spec.versions[?(@.served==true&&@.storage==true)].name}'
+      ansible.builtin.shell: microk8s kubectl get crd secretstores.external-secrets.io -o jsonpath='{.spec.versions[?(@.storage)].name}'
       register: eso_api_ver
       changed_when: false
 
