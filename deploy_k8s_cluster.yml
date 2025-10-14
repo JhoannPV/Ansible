@@ -76,7 +76,7 @@
       changed_when: false
 
     - name: Check if MetalLB IPAddressPool exists
-      ansible.builtin.shell: microk8s kubectl -n metallb-system get ipaddresspool default-address-pool
+      ansible.builtin.shell: microk8s kubectl -n metallb-system get ipaddresspools.metallb.io default-address-pool
       register: metallb_pool_check
       failed_when: false
       changed_when: false
