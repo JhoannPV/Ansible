@@ -1,0 +1,16 @@
+---
+- name: Pre-pull de imágenes en MicroK8s (containerd)
+  hosts: controller
+  become: true
+  vars_files:
+    - vars/env.yml
+  tasks:
+    - name: Asegurar que microk8s esté corriendo
+      ansible.builtin.command: microk8s status --wait-ready
+
+    - name: Descargar imágenes necesarias
+      ansible.builtin.command: "microk8s ctr images pull {{ item }}"
+      loop:
+        - "{{ FRONTEND_IMAGE }}"
+        - "{{ BACKEND_IMAGE }}"
+        - "{{ MONGODB_IMAGE }}"

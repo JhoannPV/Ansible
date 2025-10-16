@@ -317,3 +317,56 @@ nano task_virtual_machines/env.yml
 ---
 
 **Desarrollado por:** [JhoannPV](https://github.com/JhoannPV)  
+
+---
+
+## ☸️ Despliegue K8s con Services ClusterIP (sin LoadBalancer, sin Vault)
+
+Este flujo elimina el LoadBalancer/Ingress y desinstala Vault/External Secrets. Se despliega MongoDB, Backend y Frontend con Services `ClusterIP`. El frontend enruta `/api` al backend (puerto 3001) dentro del cluster mediante Nginx.
+
+Imágenes en Docker Hub utilizadas (puedes cambiarlas en `vars/env.yml`):
+
+- docker.io/jalbertobohorquez/calendar-frontend:latest
+- docker.io/jalbertobohorquez/calendar-backend:latest
+- docker.io/jalbertobohorquez/mongodb:latest
+
+1) Variables de entorno
+
+```bash
+cp vars/env.yml.template vars/env.yml
+nano vars/env.yml
+```
+
+2) (Opcional) Pre-pull de imágenes
+
+```bash
+ansible-playbook -i inventory.ini pull_images_microk8s.yml
+```
+
+3) Desinstalar Vault/ESO y deshabilitar MetalLB
+
+```bash
+ansible-playbook -i inventory.ini uninstall_vault.yml
+```
+
+4) Desplegar con Services ClusterIP (orden: Mongo -> Backend -> Frontend)
+
+```bash
+ansible-playbook -i inventory.ini deploy_clusterip.yml
+```
+
+5) Acceso local con port-forward
+
+```bash
+# Backend en 3001
+microk8s kubectl -n calendar-app port-forward svc/calendar-backend 3001:3001
+
+# Frontend en 8080
+microk8s kubectl -n calendar-app port-forward svc/calendar-frontend 8080:80
+```
+
+Navega a http://localhost:8080. El frontend hablará al backend usando `/api` (proxy a 3001).
+
+Notas:
+- `host.docker.internal` no aplica dentro de MicroK8s; el backend usa DNS del Service `mongo-db:27017`.
+- Ajusta `FRONTEND_IMAGE`, `BACKEND_IMAGE`, `MONGODB_IMAGE` y `K8S_NAMESPACE` en `vars/env.yml` según tu entorno.

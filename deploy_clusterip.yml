@@ -1,0 +1,116 @@
+---
+- name: Desplegar Calendar App con Services ClusterIP en MicroK8s
+  hosts: controller
+  become: true
+  vars_files:
+    - vars/env.yml
+
+  vars:
+    k8s_tmp_dir: "/tmp/calendar-k8s"
+
+  tasks:
+    - name: Crear directorio temporal para manifests
+      ansible.builtin.file:
+        path: "{{ k8s_tmp_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Render namespace
+      ansible.builtin.template:
+        src: templates/k8s/namespace.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/00-namespace.yaml"
+
+    - name: Render secret con variables de entorno
+      ansible.builtin.template:
+        src: templates/k8s/secret-env.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/01-secret-env.yaml"
+      no_log: true
+
+    - name: Render MongoDB manifests
+      ansible.builtin.template:
+        src: templates/k8s/mongodb-deployment.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/10-mongodb-deployment.yaml"
+    
+    - name: Render MongoDB service
+      ansible.builtin.template:
+        src: templates/k8s/mongodb-service.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/11-mongodb-service.yaml"
+
+    - name: Render Backend manifests
+      ansible.builtin.template:
+        src: templates/k8s/backend-deployment.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/20-backend-deployment.yaml"
+
+    - name: Render Backend service
+      ansible.builtin.template:
+        src: templates/k8s/backend-service.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/21-backend-service.yaml"
+
+    - name: Render Frontend configmap (nginx)
+      ansible.builtin.template:
+        src: templates/k8s/frontend-configmap.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/30-frontend-configmap.yaml"
+
+    - name: Render Frontend deployment
+      ansible.builtin.template:
+        src: templates/k8s/frontend-deployment.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/31-frontend-deployment.yaml"
+
+    - name: Render Frontend service
+      ansible.builtin.template:
+        src: templates/k8s/frontend-service.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/32-frontend-service.yaml"
+
+    - name: Aplicar namespace
+      ansible.builtin.command: "microk8s kubectl apply -f {{ k8s_tmp_dir }}/00-namespace.yaml"
+
+    - name: Aplicar secret
+      ansible.builtin.command: "microk8s kubectl apply -f {{ k8s_tmp_dir }}/01-secret-env.yaml"
+
+    - name: Desplegar MongoDB (deployment y service)
+      ansible.builtin.shell: |
+        set -e
+        microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/10-mongodb-deployment.yaml
+        microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/11-mongodb-service.yaml
+
+    - name: Esperar a que MongoDB esté listo
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} rollout status deployment/mongodb --timeout=180s"
+      register: rollout_mongo
+      retries: 10
+      delay: 5
+      until: rollout_mongo.rc == 0
+
+    - name: Desplegar Backend (deployment y service)
+      ansible.builtin.shell: |
+        set -e
+        microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/20-backend-deployment.yaml
+        microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/21-backend-service.yaml
+
+    - name: Esperar a que Backend esté listo
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} rollout status deployment/calendar-backend --timeout=300s"
+      register: rollout_be
+      retries: 10
+      delay: 5
+      until: rollout_be.rc == 0
+
+    - name: Desplegar Frontend (configmap, deployment y service)
+      ansible.builtin.shell: |
+        set -e
+        microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/30-frontend-configmap.yaml
+        microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/31-frontend-deployment.yaml
+        microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/32-frontend-service.yaml
+
+    - name: Esperar a que Frontend esté listo
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} rollout status deployment/calendar-frontend --timeout=180s"
+      register: rollout_fe
+      retries: 10
+      delay: 5
+      until: rollout_fe.rc == 0
+
+    - name: Mostrar Services creados
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} get svc"
+      register: svc_out
+
+    - name: Imprimir Services
+      ansible.builtin.debug:
+        var: svc_out.stdout_lines

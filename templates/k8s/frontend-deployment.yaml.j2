@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: calendar-frontend
+  namespace: {{ K8S_NAMESPACE }}
+  labels:
+    app: calendar-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: calendar-frontend
+  template:
+    metadata:
+      labels:
+        app: calendar-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: {{ FRONTEND_IMAGE }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: frontend-nginx-conf
