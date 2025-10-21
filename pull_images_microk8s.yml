@@ -1,6 +1,6 @@
 ---
-- name: Pre-pull de imágenes en MicroK8s (containerd)
-  hosts: controller
+- name: Pre-pull de imágenes en MicroK8s (containerd) en todos los nodos
+  hosts: all
   become: true
   vars_files:
     - vars/env.yml
