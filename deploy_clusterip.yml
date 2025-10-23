@@ -17,32 +17,7 @@
       ansible.builtin.debug:
         msg: "Usando namespace: {{ K8S_NAMESPACE }}"
 
-    - name: Habilitar addon storage (hostpath) en MicroK8s (idempotente)
-      ansible.builtin.command: microk8s enable storage
-      become: true
-      register: storage_enable
-      changed_when: "'Nothing to do for storage' not in storage_enable.stdout"
-
-    - name: Esperar a que exista el StorageClass
-      ansible.builtin.command: "microk8s kubectl get storageclass {{ STORAGE_CLASS_NAME | default('microk8s-hostpath') }} -o name"
-      register: sc_out
-      retries: 10
-      delay: 6
-      until: sc_out.rc == 0
-      become: false
-
-    - name: Obtener volumeBindingMode del StorageClass
-      ansible.builtin.command: "microk8s kubectl get storageclass {{ STORAGE_CLASS_NAME | default('microk8s-hostpath') }} -o jsonpath={.volumeBindingMode}"
-      register: sc_binding_mode_cmd
-      become: false
-
-    - name: Establecer variable de binding mode
-      ansible.builtin.set_fact:
-        sc_binding_mode: "{{ sc_binding_mode_cmd.stdout | default('') }}"
-
-    - name: Mostrar StorageClass volumeBindingMode
-      ansible.builtin.debug:
-        msg: "StorageClass {{ STORAGE_CLASS_NAME | default('microk8s-hostpath') }} volumeBindingMode = '{{ sc_binding_mode }}'"
+    
 
     - name: Crear directorio temporal para manifests
       ansible.builtin.file:
@@ -65,10 +40,7 @@
         dest: "{{ k8s_tmp_dir }}/01-secret-env.yaml"
       no_log: true
 
-    - name: Render PVC de MongoDB
-      ansible.builtin.template:
-        src: templates/k8s/mongodb-pvc.yaml.j2
-        dest: "{{ k8s_tmp_dir }}/05-mongodb-pvc.yaml"
+    
 
     - name: Render MongoDB manifests
       ansible.builtin.template:
@@ -111,19 +83,7 @@
     - name: Aplicar secret
       ansible.builtin.command: "microk8s kubectl apply -f {{ k8s_tmp_dir }}/01-secret-env.yaml"
 
-    - name: Aplicar PVC de MongoDB
-      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/05-mongodb-pvc.yaml"
-
-    - name: Esperar a que el PVC de MongoDB esté Bound (solo si bindingMode=Immediate)
-      ansible.builtin.shell: |
-        microk8s kubectl -n {{ K8S_NAMESPACE }} get pvc mongo-data -o jsonpath='{.status.phase}'
-      register: pvc_phase
-      retries: 20
-      delay: 5
-      until: pvc_phase.stdout.strip() == 'Bound'
-      changed_when: false
-      become: false
-      when: sc_binding_mode != 'WaitForFirstConsumer'
+    
 
     - name: Desplegar MongoDB (deployment y service)
       ansible.builtin.shell: |
