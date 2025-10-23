@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongo-data
+  namespace: {{ K8S_NAMESPACE | default('calendar-app') }}
+  labels:
+    app: mongodb
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ STORAGE_CLASS_NAME | default('microk8s-hostpath') | quote }}
+  resources:
+    requests:
+      storage: {{ MONGODB_STORAGE_SIZE | default('5Gi') }}

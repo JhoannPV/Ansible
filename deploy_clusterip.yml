@@ -17,6 +17,20 @@
       ansible.builtin.debug:
         msg: "Usando namespace: {{ K8S_NAMESPACE }}"
 
+    - name: Habilitar addon storage (hostpath) en MicroK8s (idempotente)
+      ansible.builtin.command: microk8s enable storage
+      become: true
+      register: storage_enable
+      changed_when: "'Nothing to do for storage' not in storage_enable.stdout"
+
+    - name: Esperar a que exista el StorageClass microk8s-hostpath
+      ansible.builtin.command: microk8s kubectl get storageclass microk8s-hostpath -o name
+      register: sc_out
+      retries: 10
+      delay: 6
+      until: sc_out.rc == 0
+      become: false
+
     - name: Crear directorio temporal para manifests
       ansible.builtin.file:
         path: "{{ k8s_tmp_dir }}"
@@ -37,6 +51,11 @@
         src: templates/k8s/secret-env.yaml.j2
         dest: "{{ k8s_tmp_dir }}/01-secret-env.yaml"
       no_log: true
+
+    - name: Render PVC de MongoDB
+      ansible.builtin.template:
+        src: templates/k8s/mongodb-pvc.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/05-mongodb-pvc.yaml"
 
     - name: Render MongoDB manifests
       ansible.builtin.template:
@@ -78,6 +97,9 @@
 
     - name: Aplicar secret
       ansible.builtin.command: "microk8s kubectl apply -f {{ k8s_tmp_dir }}/01-secret-env.yaml"
+
+    - name: Aplicar PVC de MongoDB
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/05-mongodb-pvc.yaml"
 
     - name: Desplegar MongoDB (deployment y service)
       ansible.builtin.shell: |
