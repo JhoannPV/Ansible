@@ -37,6 +37,10 @@
       delay: 8
       become: false
 
+    - name: Eliminar Ingress legacy 'calendar-ingress' si existe (para evitar conflicto de host)
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} delete ingress calendar-ingress --ignore-not-found"
+      become: false
+
     - name: Render Ingress para el frontend
       ansible.builtin.template:
         src: templates/k8s/ingress.yaml.j2
@@ -57,11 +61,18 @@
       register: svc_out
       become: false
 
+    - name: Mostrar Endpoints del frontend
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} get endpoints calendar-frontend -o wide"
+      register: ep_out
+      become: false
+      failed_when: false
+
     - name: Imprimir Ingress y Services
       ansible.builtin.debug:
         msg:
           - "{{ ingress_out.stdout | default('') }}"
           - "{{ svc_out.stdout | default('') }}"
+          - "{{ ep_out.stdout | default('') }}"
 
     - name: Instrucciones de acceso
       ansible.builtin.debug:

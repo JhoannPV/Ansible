@@ -4,8 +4,9 @@ metadata:
   name: calendar-frontend-ingress
   namespace: {{ K8S_NAMESPACE | default('calendar-app') }}
   annotations:
-    kubernetes.io/ingress.class: nginx
+    kubernetes.io/ingress.class: public
 spec:
+  ingressClassName: public
   rules:
     - host: {{ HOST_NAME | default('calendar.local') }}
       http:
