@@ -1,7 +1,6 @@
 ---
 - name: Desplegar Calendar App con Services ClusterIP en MicroK8s
   hosts: controller
-  become: true
   vars_files:
     - vars/env.yml
 
