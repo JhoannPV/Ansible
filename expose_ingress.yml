@@ -1,0 +1,51 @@
+---
+- name: Exponer frontend con Ingress en MicroK8s
+  hosts: controller
+  vars_files:
+    - vars/env.yml
+
+  vars:
+    k8s_tmp_dir: "/tmp/calendar-k8s"
+    K8S_NAMESPACE_DEFAULT: "calendar-app"
+
+  tasks:
+    - name: Establecer namespace por defecto si no está definido
+      ansible.builtin.set_fact:
+        K8S_NAMESPACE: "{{ K8S_NAMESPACE | default(K8S_NAMESPACE_DEFAULT) }}"
+
+    - name: Habilitar addon ingress en MicroK8s (idempotente)
+      ansible.builtin.command: microk8s enable ingress
+      become: true
+      register: ingress_enable
+      changed_when: "'Nothing to do for ingress' not in ingress_enable.stdout"
+
+    - name: Esperar a que el Ingress Controller esté listo
+      ansible.builtin.command: "microk8s kubectl -n ingress get pods -o wide"
+      register: ingress_pods
+      until: ingress_pods.stdout is search('Running')
+      retries: 15
+      delay: 8
+      become: false
+
+    - name: Render Ingress para el frontend
+      ansible.builtin.template:
+        src: templates/k8s/ingress.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/40-frontend-ingress.yaml"
+      vars:
+        HOST_NAME: "{{ HOST_NAME | default('calendar.local') }}"
+
+    - name: Aplicar Ingress
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/40-frontend-ingress.yaml"
+      become: false
+
+    - name: Mostrar Ingress y endpoints
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} get ingress && microk8s kubectl -n {{ K8S_NAMESPACE }} get svc"
+      register: out
+      become: false
+
+    - name: Instrucciones de acceso
+      ansible.builtin.debug:
+        msg:
+          - "Añade en tu PC una entrada en /etc/hosts apuntando el hostname al IP del nodo:"
+          - "    192.168.1.24  {{ HOST_NAME | default('calendar.local') }}  # o usa el IP del worker"
+          - "Luego accede a: http://{{ HOST_NAME | default('calendar.local') }}"

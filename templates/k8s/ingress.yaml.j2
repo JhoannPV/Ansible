@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: calendar-frontend-ingress
+  namespace: {{ K8S_NAMESPACE | default('calendar-app') }}
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+    - host: {{ HOST_NAME | default('calendar.local') }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: calendar-frontend
+                port:
+                  number: 80
