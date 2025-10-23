@@ -14,3 +14,4 @@
         - "{{ FRONTEND_IMAGE }}"
         - "{{ BACKEND_IMAGE }}"
         - "{{ MONGODB_IMAGE }}"
+        - "docker.io/library/busybox:1.36.1"

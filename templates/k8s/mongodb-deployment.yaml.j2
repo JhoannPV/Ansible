@@ -15,12 +15,19 @@ spec:
       labels:
         app: mongodb
     spec:
+      securityContext:
+        fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: mongodb
           image: {{ MONGODB_IMAGE | default('docker.io/jalbertobohorquez/mongodb:latest') }}
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 27017
+          securityContext:
+            runAsUser: 999
+            runAsGroup: 999
+            allowPrivilegeEscalation: false
           env:
             - name: MONGO_INITDB_ROOT_USERNAME
               valueFrom:
@@ -35,15 +42,20 @@ spec:
           volumeMounts:
             - name: mongo-data
               mountPath: /data/db
+          startupProbe:
+            tcpSocket:
+              port: 27017
+            failureThreshold: 30
+            periodSeconds: 10
           readinessProbe:
             tcpSocket:
               port: 27017
-            initialDelaySeconds: 5
+            initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
             tcpSocket:
               port: 27017
-            initialDelaySeconds: 10
+            initialDelaySeconds: 30
             periodSeconds: 20
           resources:
             requests:

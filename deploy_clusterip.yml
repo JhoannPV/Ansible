@@ -101,19 +101,73 @@
     - name: Aplicar PVC de MongoDB
       ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/05-mongodb-pvc.yaml"
 
+    - name: Esperar a que el PVC de MongoDB esté Bound
+      ansible.builtin.shell: |
+        microk8s kubectl -n {{ K8S_NAMESPACE }} get pvc mongo-data -o jsonpath='{.status.phase}'
+      register: pvc_phase
+      retries: 20
+      delay: 5
+      until: pvc_phase.stdout.strip() == 'Bound'
+      changed_when: false
+      become: false
+
     - name: Desplegar MongoDB (deployment y service)
       ansible.builtin.shell: |
         set -e
         microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/10-mongodb-deployment.yaml
         microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/11-mongodb-service.yaml
 
-    - name: Esperar a que MongoDB esté listo
-      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} rollout status deployment/mongodb --timeout=600s"
-      register: rollout_mongo
-      retries: 10
-      delay: 5
-      until: rollout_mongo.rc == 0
-      become: false
+    - block:
+        - name: Esperar a que MongoDB esté listo
+          ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} rollout status deployment/mongodb --timeout=600s"
+          register: rollout_mongo
+          retries: 10
+          delay: 5
+          until: rollout_mongo.rc == 0
+          become: false
+      rescue:
+        - name: Listar pods de MongoDB
+          ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} get pods -l app=mongodb -o wide"
+          register: mongo_pods
+          ignore_errors: true
+          become: false
+        - name: Describir deployment de MongoDB
+          ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} describe deployment/mongodb"
+          register: mongo_deploy_desc
+          ignore_errors: true
+          become: false
+        - name: Describir pods de MongoDB
+          ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} describe pods -l app=mongodb"
+          register: mongo_pods_desc
+          ignore_errors: true
+          become: false
+        - name: Ver estado del PVC/PV de MongoDB
+          ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} get pvc,pv"
+          register: mongo_pvc_pv
+          ignore_errors: true
+          become: false
+        - name: Describir PVC mongo-data
+          ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} describe pvc mongo-data"
+          register: mongo_pvc_desc
+          ignore_errors: true
+          become: false
+        - name: Logs de MongoDB (ultimas 200 líneas)
+          ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} logs deploy/mongodb -c mongodb --tail=200"
+          register: mongo_logs
+          ignore_errors: true
+          become: false
+        - name: Mostrar diagnostico MongoDB
+          ansible.builtin.debug:
+            msg:
+              - "PODS: {{ mongo_pods.stdout | default('') }}"
+              - "DEPLOY DESCRIBE: {{ mongo_deploy_desc.stdout | default('') }}"
+              - "PODS DESCRIBE: {{ mongo_pods_desc.stdout | default('') }}"
+              - "PVC/PV: {{ mongo_pvc_pv.stdout | default('') }}"
+              - "PVC DESCRIBE: {{ mongo_pvc_desc.stdout | default('') }}"
+              - "LOGS:\n{{ mongo_logs.stdout | default('') }}"
+        - name: Fallar explícitamente por timeout de MongoDB
+          ansible.builtin.fail:
+            msg: "MongoDB no alcanzó estado listo dentro del tiempo. Revisa los eventos/logs mostrados arriba."
 
     - name: Desplegar Backend (deployment y service)
       ansible.builtin.shell: |
