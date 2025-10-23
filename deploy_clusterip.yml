@@ -88,6 +88,7 @@
       retries: 10
       delay: 5
       until: rollout_mongo.rc == 0
+      become: false
 
     - name: Desplegar Backend (deployment y service)
       ansible.builtin.shell: |
@@ -101,6 +102,7 @@
       retries: 10
       delay: 5
       until: rollout_be.rc == 0
+      become: false
 
     - name: Desplegar Frontend (configmap, deployment y service)
       ansible.builtin.shell: |
@@ -115,10 +117,12 @@
       retries: 10
       delay: 5
       until: rollout_fe.rc == 0
+      become: false
 
     - name: Mostrar Services creados
       ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} get svc"
       register: svc_out
+      become: false
 
     - name: Imprimir Services
       ansible.builtin.debug:
