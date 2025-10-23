@@ -46,10 +46,22 @@
       ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/40-frontend-ingress.yaml"
       become: false
 
-    - name: Mostrar Ingress y endpoints
-      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} get ingress && microk8s kubectl -n {{ K8S_NAMESPACE }} get svc"
-      register: out
+    - name: Mostrar Ingress
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} get ingress"
+      register: ingress_out
       become: false
+      failed_when: false
+
+    - name: Mostrar Services
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} get svc"
+      register: svc_out
+      become: false
+
+    - name: Imprimir Ingress y Services
+      ansible.builtin.debug:
+        msg:
+          - "{{ ingress_out.stdout | default('') }}"
+          - "{{ svc_out.stdout | default('') }}"
 
     - name: Instrucciones de acceso
       ansible.builtin.debug:
