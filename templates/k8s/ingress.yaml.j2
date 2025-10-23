@@ -11,6 +11,13 @@ spec:
     - host: {{ HOST_NAME | default('calendar.local') }}
       http:
         paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: calendar-backend
+                port:
+                  number: 3001
           - path: /
             pathType: Prefix
             backend:
