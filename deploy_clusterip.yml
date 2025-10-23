@@ -22,6 +22,10 @@
         path: "{{ k8s_tmp_dir }}"
         state: directory
         mode: '0755'
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+        recurse: true
+      become: true
 
     - name: Render namespace
       ansible.builtin.template:
