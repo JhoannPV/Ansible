@@ -105,13 +105,45 @@
       ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} rollout restart deployment/calendar-backend"
       become: false
 
-    - name: Esperar a que Backend esté listo
-      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} rollout status deployment/calendar-backend --timeout=600s"
-      register: rollout_be
-      retries: 10
-      delay: 5
-      until: rollout_be.rc == 0
-      become: false
+    - block:
+        - name: Esperar a que Backend esté listo
+          ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} rollout status deployment/calendar-backend --timeout=600s"
+          register: rollout_be
+          retries: 10
+          delay: 5
+          until: rollout_be.rc == 0
+          become: false
+      rescue:
+        - name: Listar pods del backend
+          ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} get pods -l app=calendar-backend -o wide"
+          register: be_pods
+          ignore_errors: true
+          become: false
+        - name: Describir deployment del backend
+          ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} describe deployment/calendar-backend"
+          register: be_deploy_desc
+          ignore_errors: true
+          become: false
+        - name: Describir pods del backend
+          ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} describe pods -l app=calendar-backend"
+          register: be_pods_desc
+          ignore_errors: true
+          become: false
+        - name: Logs del backend (ultimas 200 líneas)
+          ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} logs deploy/calendar-backend -c backend --tail=200"
+          register: be_logs
+          ignore_errors: true
+          become: false
+        - name: Mostrar diagnostico backend
+          ansible.builtin.debug:
+            msg:
+              - "PODS: {{ be_pods.stdout | default('') }}"
+              - "DEPLOY DESCRIBE: {{ be_deploy_desc.stdout | default('') }}"
+              - "PODS DESCRIBE: {{ be_pods_desc.stdout | default('') }}"
+              - "LOGS:\n{{ be_logs.stdout | default('') }}"
+        - name: Fallar explícitamente por timeout del backend
+          ansible.builtin.fail:
+            msg: "El backend no alcanzó estado listo dentro del tiempo. Revisa los logs y eventos mostrados arriba."
 
     - name: Desplegar Frontend (configmap, deployment y service)
       ansible.builtin.shell: |
