@@ -82,7 +82,7 @@
         microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/11-mongodb-service.yaml
 
     - name: Esperar a que MongoDB esté listo
-      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} rollout status deployment/mongodb --timeout=180s"
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} rollout status deployment/mongodb --timeout=600s"
       register: rollout_mongo
       retries: 10
       delay: 5
@@ -94,9 +94,15 @@
         set -e
         microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/20-backend-deployment.yaml
         microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/21-backend-service.yaml
+      args:
+        executable: /bin/bash
+
+    - name: Reiniciar rollout del Backend para tomar cambios de Secret/env
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} rollout restart deployment/calendar-backend"
+      become: false
 
     - name: Esperar a que Backend esté listo
-      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} rollout status deployment/calendar-backend --timeout=300s"
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} rollout status deployment/calendar-backend --timeout=600s"
       register: rollout_be
       retries: 10
       delay: 5
@@ -109,9 +115,15 @@
         microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/30-frontend-configmap.yaml
         microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/31-frontend-deployment.yaml
         microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/32-frontend-service.yaml
+      args:
+        executable: /bin/bash
+
+    - name: Reiniciar rollout del Frontend para tomar cambios de ConfigMap
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} rollout restart deployment/calendar-frontend"
+      become: false
 
     - name: Esperar a que Frontend esté listo
-      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} rollout status deployment/calendar-frontend --timeout=180s"
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} rollout status deployment/calendar-frontend --timeout=600s"
       register: rollout_fe
       retries: 10
       delay: 5
