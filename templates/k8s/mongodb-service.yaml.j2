@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: mongo-db
-  namespace: {{ K8S_NAMESPACE }}
+  namespace: {{ K8S_NAMESPACE | default('calendar-app') }}
   labels:
     app: mongodb
 spec:

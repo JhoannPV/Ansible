@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: calendar-backend
-  namespace: {{ K8S_NAMESPACE }}
+  namespace: {{ K8S_NAMESPACE | default('calendar-app') }}
   labels:
     app: calendar-backend
 spec:
@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: {{ BACKEND_IMAGE }}
+          image: {{ BACKEND_IMAGE | default('docker.io/jalbertobohorquez/calendar-backend:latest') }}
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3001

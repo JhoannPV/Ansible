@@ -7,8 +7,17 @@
 
   vars:
     k8s_tmp_dir: "/tmp/calendar-k8s"
+    K8S_NAMESPACE_DEFAULT: "calendar-app"
 
   tasks:
+    - name: Establecer namespace por defecto si no está definido
+      ansible.builtin.set_fact:
+        K8S_NAMESPACE: "{{ K8S_NAMESPACE | default(K8S_NAMESPACE_DEFAULT) }}"
+
+    - name: Mostrar namespace efectivo
+      ansible.builtin.debug:
+        msg: "Usando namespace: {{ K8S_NAMESPACE }}"
+
     - name: Crear directorio temporal para manifests
       ansible.builtin.file:
         path: "{{ k8s_tmp_dir }}"
