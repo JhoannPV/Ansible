@@ -13,6 +13,16 @@
       ansible.builtin.set_fact:
         K8S_NAMESPACE: "{{ K8S_NAMESPACE | default(K8S_NAMESPACE_DEFAULT) }}"
 
+    - name: Crear directorio temporal para manifests (si no existe)
+      ansible.builtin.file:
+        path: "{{ k8s_tmp_dir }}"
+        state: directory
+        mode: '0755'
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+        recurse: true
+      become: true
+
     - name: Habilitar addon ingress en MicroK8s (idempotente)
       ansible.builtin.command: microk8s enable ingress
       become: true
@@ -31,8 +41,6 @@
       ansible.builtin.template:
         src: templates/k8s/ingress.yaml.j2
         dest: "{{ k8s_tmp_dir }}/40-frontend-ingress.yaml"
-      vars:
-        HOST_NAME: "{{ HOST_NAME | default('calendar.local') }}"
 
     - name: Aplicar Ingress
       ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/40-frontend-ingress.yaml"
