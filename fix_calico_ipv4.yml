@@ -1,0 +1,53 @@
+---
+- name: Fix Calico image pull by preferring IPv4 and pulling image on workers
+  hosts: workers
+  become: true
+  vars:
+    calico_image: "docker.io/calico/node:v3.28.1"
+
+  tasks:
+    - name: Ensure system prefers IPv4 over IPv6 (gai.conf)
+      ansible.builtin.lineinfile:
+        path: /etc/gai.conf
+        regexp: '^precedence ::ffff:0:0/96 100'
+        line: 'precedence ::ffff:0:0/96 100'
+        state: present
+        create: yes
+
+    - name: Restart microk8s containerd
+      ansible.builtin.systemd:
+        name: snap.microk8s.daemon-containerd
+        state: restarted
+        enabled: yes
+
+    - name: Restart microk8s kubelet
+      ansible.builtin.systemd:
+        name: snap.microk8s.daemon-kubelet
+        state: restarted
+        enabled: yes
+
+    - name: Pull Calico image on worker
+      ansible.builtin.command: microk8s ctr images pull {{ calico_image }}
+      register: pull_out
+      retries: 3
+      delay: 5
+      until: pull_out.rc == 0
+
+    - name: Show pull output
+      ansible.builtin.debug:
+        var: pull_out.stdout_lines
+
+    - name: Delete Calico pods to force recreation
+      ansible.builtin.command: microk8s kubectl -n kube-system delete pods -l k8s-app=calico-node --wait=false
+      ignore_errors: true
+
+    - name: Wait for Calico to be Running on this node
+      ansible.builtin.shell: |
+        microk8s kubectl -n kube-system get pods -l k8s-app=calico-node -o wide | grep $(hostname) || true
+      register: calico_pods_now
+      retries: 6
+      delay: 5
+
+    - name: Show calico pods summary
+      ansible.builtin.debug:
+        var: calico_pods_now.stdout_lines
