@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: calendar-frontend
-  namespace: {{ K8S_NAMESPACE | default('calendar-app') }}
+  namespace: {{ K8S_NAMESPACE }}
   labels:
     app: calendar-frontend
 spec:

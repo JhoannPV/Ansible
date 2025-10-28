@@ -2,7 +2,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: calendar-frontend-ingress
-  namespace: {{ K8S_NAMESPACE | default('calendar-app') }}
+  namespace: {{ K8S_NAMESPACE }}
   annotations:
     kubernetes.io/ingress.class: public
 spec:
