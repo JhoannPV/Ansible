@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: {{ FRONTEND_IMAGE | default('docker.io/jalbertobohorquez/calendar-frontend:latest') }}
+          image: {{ FRONTEND_IMAGE }}
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80

@@ -29,7 +29,7 @@ spec:
           # Pero mantenemos nc por simplicidad; si falla, las tareas de debug lo reflejarán
       containers:
         - name: backend
-          image: {{ BACKEND_IMAGE | default('docker.io/jalbertobohorquez/calendar-backend:latest') }}
+          image: {{ BACKEND_IMAGE }}
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3001

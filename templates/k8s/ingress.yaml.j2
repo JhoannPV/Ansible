@@ -8,7 +8,7 @@ metadata:
 spec:
   ingressClassName: public
   rules:
-    - host: {{ HOST_NAME | default('calendar.local') }}
+    - host: {{ HOST_NAME }}
       http:
         paths:
           - path: /api

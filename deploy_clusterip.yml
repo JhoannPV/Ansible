@@ -19,6 +19,35 @@
       ansible.builtin.debug:
         msg: "Usando namespace: {{ K8S_NAMESPACE }}"
 
+    - name: Validar imágenes requeridas (FRONTEND_IMAGE, BACKEND_IMAGE, MONGODB_IMAGE)
+      ansible.builtin.assert:
+        that:
+          - FRONTEND_IMAGE is defined
+          - FRONTEND_IMAGE | length > 0
+          - BACKEND_IMAGE is defined
+          - BACKEND_IMAGE | length > 0
+          - MONGODB_IMAGE is defined
+          - MONGODB_IMAGE | length > 0
+        fail_msg: "Faltan variables de imagen. Define FRONTEND_IMAGE, BACKEND_IMAGE y MONGODB_IMAGE en Ansible/vars/env.yml."
+
+    - name: Validar variables de Secret requeridas (Mongo, Backend y Frontend)
+      ansible.builtin.assert:
+        that:
+          - MONGO_INITDB_USERNAME is defined
+          - MONGO_INITDB_USERNAME | length > 0
+          - MONGO_INITDB_PASSWORD is defined
+          - MONGO_INITDB_PASSWORD | length > 0
+          - MONGO_DB_NAME is defined
+          - MONGO_DB_NAME | length > 0
+          - MONGO_URL is defined
+          - MONGO_URL | length > 0
+          - JWT_SEED is defined
+          - JWT_SEED | length > 0
+          - PORT is defined
+          - VITE_API_URL is defined
+          - VITE_API_URL | length > 0
+        fail_msg: "Faltan variables para el Secret. Revisa Ansible/vars/env.yml (Mongo creds/URL, JWT_SEED, PORT, VITE_API_URL)."
+
     
 
     - name: Crear directorio temporal para manifests

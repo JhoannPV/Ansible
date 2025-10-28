@@ -5,6 +5,17 @@
   vars_files:
     - vars/env.yml
   tasks:
+    - name: Validar imágenes requeridas (FRONTEND_IMAGE, BACKEND_IMAGE, MONGODB_IMAGE)
+      ansible.builtin.assert:
+        that:
+          - FRONTEND_IMAGE is defined
+          - FRONTEND_IMAGE | length > 0
+          - BACKEND_IMAGE is defined
+          - BACKEND_IMAGE | length > 0
+          - MONGODB_IMAGE is defined
+          - MONGODB_IMAGE | length > 0
+        fail_msg: "Faltan variables de imagen. Define FRONTEND_IMAGE, BACKEND_IMAGE y MONGODB_IMAGE en Ansible/vars/env.yml."
+
     - name: Asegurar que microk8s esté corriendo
       ansible.builtin.command: microk8s status --wait-ready
 

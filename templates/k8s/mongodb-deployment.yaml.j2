@@ -20,7 +20,7 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: mongodb
-          image: {{ MONGODB_IMAGE | default('docker.io/jalbertobohorquez/mongodb:latest') }}
+          image: {{ MONGODB_IMAGE }}
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 27017
