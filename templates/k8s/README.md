@@ -42,25 +42,13 @@ cp Ansible/vars/env.yml.template Ansible/vars/env.yml
 nano Ansible/vars/env.yml
 ```
 
-2) (Opcional) Pre-pull de imágenes en todos los nodos
-
-```bash
-ansible-playbook -i Ansible/inventory.ini Ansible/pull_images_microk8s.yml
-```
-
-3) (Opcional) Desinstalar Vault/External Secrets y deshabilitar MetalLB
-
-```bash
-ansible-playbook -i Ansible/inventory.ini Ansible/uninstall_vault.yml
-```
-
-4) Desplegar con Services ClusterIP (Mongo → Backend → Frontend)
+2) Desplegar con Services ClusterIP (Mongo → Backend → Frontend)
 
 ```bash
 ansible-playbook -i Ansible/inventory.ini Ansible/deploy_clusterip.yml
 ```
 
-5) Exponer por Ingress (requerido `HOST_NAME` y `K8S_NAMESPACE` definidos)
+3) Exponer por Ingress (requerido `HOST_NAME` y `K8S_NAMESPACE` definidos)
 
 ```bash
 ansible-playbook -i Ansible/inventory.ini Ansible/expose_ingress.yml
