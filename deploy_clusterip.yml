@@ -19,6 +19,28 @@
       ansible.builtin.debug:
         msg: "Usando namespace: {{ K8S_NAMESPACE }}"
 
+    - name: Verificar StorageClass 'microk8s-hostpath' (existencia)
+      ansible.builtin.command: "microk8s kubectl get sc -o jsonpath='{.items[*].metadata.name}'"
+      register: sc_names
+      changed_when: false
+      failed_when: false
+      become: false
+
+    - name: Habilitar storage en MicroK8s si falta
+      ansible.builtin.command: microk8s enable storage
+      become: true
+      when: sc_names.stdout is not search('microk8s-hostpath')
+
+    - name: Esperar a que StorageClass 'microk8s-hostpath' exista
+      ansible.builtin.command: "microk8s kubectl get sc -o jsonpath='{\u007b.items[*].metadata.name\u007d}'"
+      register: sc_names_wait
+      until: sc_names_wait.stdout is search('microk8s-hostpath')
+      retries: 10
+      delay: 6
+      changed_when: false
+      become: false
+      when: sc_names.stdout is not search('microk8s-hostpath')
+
     - name: Validar imágenes requeridas (FRONTEND_IMAGE, BACKEND_IMAGE, MONGODB_IMAGE)
       ansible.builtin.assert:
         that:
@@ -71,7 +93,14 @@
         dest: "{{ k8s_tmp_dir }}/01-secret-env.yaml"
       no_log: true
 
-    
+    - name: Render MongoDB PVC (persistencia de datos)
+      ansible.builtin.template:
+        src: templates/k8s/mongodb-pvc.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/09-mongodb-pvc.yaml"
+
+    - name: Aplicar MongoDB PVC
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/09-mongodb-pvc.yaml"
+      become: false
 
     - name: Render MongoDB manifests
       ansible.builtin.template:

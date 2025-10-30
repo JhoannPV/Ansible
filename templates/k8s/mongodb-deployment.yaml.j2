@@ -66,4 +66,5 @@ spec:
               memory: "512Mi"
       volumes:
         - name: mongo-data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: mongo-data
