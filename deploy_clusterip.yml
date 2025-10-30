@@ -143,8 +143,6 @@
     - name: Aplicar secret
       ansible.builtin.command: "microk8s kubectl apply -f {{ k8s_tmp_dir }}/01-secret-env.yaml"
 
-    
-
     - name: Desplegar MongoDB (deployment y service)
       ansible.builtin.shell: |
         set -e
