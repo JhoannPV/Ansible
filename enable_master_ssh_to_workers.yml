@@ -9,9 +9,27 @@
   gather_facts: false
   become: false
   vars:
-    ssh_user: "{{ ansible_user | default('sysadmin') }}"
+    # Forzar configuración de conexión incluso si se ejecuta con sudo (root)
+    ansible_connection: ssh
+    ansible_user: sysadmin
+    ansible_ssh_private_key_file: "/home/jhoann-bohorquez/.ssh/id_ed25519"
+    ansible_become: false
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+    # Usuario/paths en el host remoto (controller)
+    ssh_user: "{{ ansible_user }}"
     ssh_home: "{{ '/root' if ssh_user == 'root' else '/home/' + ssh_user }}"
+    master_keys_dir: "{{ playbook_dir }}/master_keys"
+    master_pubkey_path: "{{ master_keys_dir }}/master_id_ed25519.pub"
   tasks:
+    - name: Asegurar directorio local para guardar la clave pública (control node)
+      ansible.builtin.file:
+        path: "{{ master_keys_dir }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      run_once: true
+
     - name: Asegurar existencia de ~/.ssh en el master
       ansible.builtin.file:
         path: "{{ ssh_home }}/.ssh"
@@ -34,7 +52,7 @@
     - name: Traer la clave pública del master al controlador
       ansible.builtin.fetch:
         src: "{{ ssh_home }}/.ssh/id_ed25519.pub"
-        dest: "./master_keys/master_id_ed25519.pub"
+        dest: "{{ master_pubkey_path }}"
         flat: yes
 
 - name: Instalar la clave pública del master en los workers
@@ -42,8 +60,17 @@
   gather_facts: false
   become: false
   vars:
-    ssh_user: "{{ ansible_user | default('sysadmin') }}"
+    # Forzar configuración de conexión incluso si se ejecuta con sudo (root)
+    ansible_connection: ssh
+    ansible_user: sysadmin
+    ansible_ssh_private_key_file: "/home/jhoann-bohorquez/.ssh/id_ed25519"
+    ansible_become: false
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+    # Usuario/paths en los hosts remotos (workers)
+    ssh_user: "{{ ansible_user }}"
     ssh_home: "{{ '/root' if ssh_user == 'root' else '/home/' + ssh_user }}"
+    master_pubkey_path: "{{ playbook_dir }}/master_keys/master_id_ed25519.pub"
   tasks:
     - name: Asegurar existencia de ~/.ssh en el worker
       ansible.builtin.file:
@@ -57,7 +84,7 @@
       ansible.builtin.authorized_key:
         user: sysadmin
         state: present
-        key: "{{ lookup('file', './master_keys/master_id_ed25519.pub') }}"
+        key: "{{ lookup('file', master_pubkey_path) }}"
         manage_dir: yes
 
     - name: Asegurar permisos y propiedad de authorized_keys
