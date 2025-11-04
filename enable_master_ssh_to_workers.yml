@@ -8,29 +8,32 @@
   hosts: controller
   gather_facts: false
   become: false
+  vars:
+    ssh_user: "{{ ansible_user | default('sysadmin') }}"
+    ssh_home: "{{ '/root' if ssh_user == 'root' else '/home/' + ssh_user }}"
   tasks:
     - name: Asegurar existencia de ~/.ssh en el master
       ansible.builtin.file:
-        path: "{{ ansible_env.HOME }}/.ssh"
+        path: "{{ ssh_home }}/.ssh"
         state: directory
         mode: '0700'
 
     - name: Generar par de claves ed25519 en master si no existe
-      ansible.builtin.command: "ssh-keygen -t ed25519 -f {{ ansible_env.HOME }}/.ssh/id_ed25519 -N '' -C 'ansible-generated-master-key'"
+      ansible.builtin.command: "ssh-keygen -t ed25519 -f {{ ssh_home }}/.ssh/id_ed25519 -N '' -C 'ansible-generated-master-key'"
       args:
-        creates: "{{ ansible_env.HOME }}/.ssh/id_ed25519.pub"
+        creates: "{{ ssh_home }}/.ssh/id_ed25519.pub"
 
     - name: Asegurar permisos de la clave privada y pública
       ansible.builtin.file:
         path: "{{ item.path }}"
         mode: "{{ item.mode }}"
       loop:
-        - { path: "{{ ansible_env.HOME }}/.ssh/id_ed25519", mode: '0600' }
-        - { path: "{{ ansible_env.HOME }}/.ssh/id_ed25519.pub", mode: '0644' }
+        - { path: "{{ ssh_home }}/.ssh/id_ed25519", mode: '0600' }
+        - { path: "{{ ssh_home }}/.ssh/id_ed25519.pub", mode: '0644' }
 
     - name: Traer la clave pública del master al controlador
       ansible.builtin.fetch:
-        src: "{{ ansible_env.HOME }}/.ssh/id_ed25519.pub"
+        src: "{{ ssh_home }}/.ssh/id_ed25519.pub"
         dest: "./master_keys/master_id_ed25519.pub"
         flat: yes
 
@@ -38,10 +41,13 @@
   hosts: workers
   gather_facts: false
   become: false
+  vars:
+    ssh_user: "{{ ansible_user | default('sysadmin') }}"
+    ssh_home: "{{ '/root' if ssh_user == 'root' else '/home/' + ssh_user }}"
   tasks:
     - name: Asegurar existencia de ~/.ssh en el worker
       ansible.builtin.file:
-        path: "{{ ansible_env.HOME }}/.ssh"
+        path: "{{ ssh_home }}/.ssh"
         state: directory
         owner: sysadmin
         group: sysadmin
@@ -56,13 +62,13 @@
 
     - name: Asegurar permisos y propiedad de authorized_keys
       ansible.builtin.file:
-        path: "{{ ansible_env.HOME }}/.ssh/authorized_keys"
+        path: "{{ ssh_home }}/.ssh/authorized_keys"
         owner: sysadmin
         group: sysadmin
         mode: '0600'
 
     - name: Restaurar contexto SELinux si aplica (no falla si no está presente)
-      ansible.builtin.command: "restorecon -Rv {{ ansible_env.HOME }}/.ssh"
+      ansible.builtin.command: "restorecon -Rv {{ ssh_home }}/.ssh"
       args:
         warn: false
       failed_when: false
