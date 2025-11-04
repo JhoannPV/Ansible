@@ -1,0 +1,97 @@
+---
+- name: Actualizar solo el Backend (Calendar) en MicroK8s
+  hosts: controller
+  vars_files:
+    - ../vars/env.yml
+
+  vars:
+    k8s_tmp_dir: "/tmp/calendar-k8s"
+
+  tasks:
+    - name: Validar que K8S_NAMESPACE esté definido (proveer en vars/env.yml o via -e)
+      ansible.builtin.assert:
+        that:
+          - K8S_NAMESPACE is defined
+          - K8S_NAMESPACE | length > 0
+        fail_msg: "K8S_NAMESPACE no está definido. Establécelo en Ansible/vars/env.yml o pásalo con -e K8S_NAMESPACE=<namespace>."
+
+    - name: Validar que BACKEND_IMAGE esté definido
+      ansible.builtin.assert:
+        that:
+          - BACKEND_IMAGE is defined
+          - BACKEND_IMAGE | length > 0
+        fail_msg: "BACKEND_IMAGE no está definido. Establécelo en Ansible/vars/env.yml."
+
+    - name: Validar variables de Secret requeridas por el backend
+      ansible.builtin.assert:
+        that:
+          - MONGO_DB_NAME is defined
+          - MONGO_DB_NAME | length > 0
+          - MONGO_URL is defined
+          - MONGO_URL | length > 0
+          - JWT_SEED is defined
+          - JWT_SEED | length > 0
+          - PORT is defined
+        fail_msg: "Faltan variables para el Secret (MONGO_DB_NAME, MONGO_URL, JWT_SEED, PORT). Revisa Ansible/vars/env.yml."
+
+    - name: Verificar que el Namespace existe (prerrequisito)
+      ansible.builtin.command: "microk8s kubectl get ns {{ K8S_NAMESPACE }}"
+      changed_when: false
+      register: ns_check
+      failed_when: ns_check.rc != 0
+
+    - name: Crear directorio temporal para manifests (si no existe)
+      ansible.builtin.file:
+        path: "{{ k8s_tmp_dir }}"
+        state: directory
+        mode: '0755'
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+        recurse: true
+      become: true
+
+    - name: Render secret con variables de entorno (backend)
+      ansible.builtin.template:
+        src: ../templates/k8s/secret-env.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/01-secret-env.yaml"
+      no_log: true
+
+    - name: Aplicar Secret (app-env)
+      ansible.builtin.command: "microk8s kubectl apply -f {{ k8s_tmp_dir }}/01-secret-env.yaml"
+
+    - name: Render Backend deployment
+      ansible.builtin.template:
+        src: ../templates/k8s/backend-deployment.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/20-backend-deployment.yaml"
+
+    - name: Render Backend service
+      ansible.builtin.template:
+        src: ../templates/k8s/backend-service.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/21-backend-service.yaml"
+
+    - name: Aplicar Backend (deployment y service)
+      ansible.builtin.shell: |
+        set -e
+        microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/20-backend-deployment.yaml
+        microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/21-backend-service.yaml
+      args:
+        executable: /bin/bash
+
+    - name: Reiniciar rollout del Backend para tomar cambios de Secret/env
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} rollout restart deployment/calendar-backend"
+
+    - name: Esperar a que Backend esté listo
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} rollout status deployment/calendar-backend --timeout=600s"
+      register: rollout_be
+      retries: 10
+      delay: 5
+      until: rollout_be.rc == 0
+
+    - name: Mostrar Services en el namespace
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} get svc"
+      register: svc_out
+      changed_when: false
+
+    - name: Imprimir Services
+      ansible.builtin.debug:
+        var: svc_out.stdout_lines

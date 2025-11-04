@@ -1,0 +1,112 @@
+---
+- name: Actualizar solo MongoDB (Calendar) en MicroK8s
+  hosts: controller
+  vars_files:
+    - ../vars/env.yml
+
+  vars:
+    k8s_tmp_dir: "/tmp/calendar-k8s"
+
+  tasks:
+    - name: Validar que K8S_NAMESPACE esté definido (proveer en vars/env.yml o via -e)
+      ansible.builtin.assert:
+        that:
+          - K8S_NAMESPACE is defined
+          - K8S_NAMESPACE | length > 0
+        fail_msg: "K8S_NAMESPACE no está definido. Establécelo en Ansible/vars/env.yml o pásalo con -e K8S_NAMESPACE=<namespace>."
+
+    - name: Validar que MONGODB_IMAGE esté definido
+      ansible.builtin.assert:
+        that:
+          - MONGODB_IMAGE is defined
+          - MONGODB_IMAGE | length > 0
+        fail_msg: "MONGODB_IMAGE no está definido. Establécelo en Ansible/vars/env.yml."
+
+    - name: Validar credenciales/vars de Mongo
+      ansible.builtin.assert:
+        that:
+          - MONGO_INITDB_USERNAME is defined
+          - MONGO_INITDB_USERNAME | length > 0
+          - MONGO_INITDB_PASSWORD is defined
+          - MONGO_INITDB_PASSWORD | length > 0
+          - MONGO_DB_NAME is defined
+          - MONGO_DB_NAME | length > 0
+        fail_msg: "Faltan variables de Mongo (MONGO_INITDB_USERNAME, MONGO_INITDB_PASSWORD, MONGO_DB_NAME). Revisa Ansible/vars/env.yml."
+
+    - name: Verificar que el Namespace existe (prerrequisito)
+      ansible.builtin.command: "microk8s kubectl get ns {{ K8S_NAMESPACE }}"
+      changed_when: false
+      register: ns_check
+      failed_when: ns_check.rc != 0
+
+    - name: Verificar StorageClass 'microk8s-hostpath' (existencia)
+      ansible.builtin.command: "microk8s kubectl get sc -o jsonpath='{.items[*].metadata.name}'"
+      register: sc_names
+      changed_when: false
+      failed_when: false
+
+    - name: Habilitar storage en MicroK8s si falta
+      ansible.builtin.command: microk8s enable storage
+      become: true
+      when: sc_names.stdout is not search('microk8s-hostpath')
+
+    - name: Esperar a que StorageClass 'microk8s-hostpath' exista
+      ansible.builtin.command: "microk8s kubectl get sc -o jsonpath='{.items[*].metadata.name}'"
+      register: sc_names_wait
+      until: sc_names_wait.stdout is search('microk8s-hostpath')
+      retries: 10
+      delay: 6
+      changed_when: false
+      when: sc_names.stdout is not search('microk8s-hostpath')
+
+    - name: Crear directorio temporal para manifests (si no existe)
+      ansible.builtin.file:
+        path: "{{ k8s_tmp_dir }}"
+        state: directory
+        mode: '0755'
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+        recurse: true
+      become: true
+
+    - name: Render MongoDB PVC (persistencia de datos)
+      ansible.builtin.template:
+        src: ../templates/k8s/mongodb-pvc.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/09-mongodb-pvc.yaml"
+
+    - name: Aplicar MongoDB PVC
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/09-mongodb-pvc.yaml"
+
+    - name: Render MongoDB deployment
+      ansible.builtin.template:
+        src: ../templates/k8s/mongodb-deployment.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/10-mongodb-deployment.yaml"
+
+    - name: Render MongoDB service
+      ansible.builtin.template:
+        src: ../templates/k8s/mongodb-service.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/11-mongodb-service.yaml"
+
+    - name: Aplicar MongoDB (deployment y service)
+      ansible.builtin.shell: |
+        set -e
+        microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/10-mongodb-deployment.yaml
+        microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/11-mongodb-service.yaml
+      args:
+        executable: /bin/bash
+
+    - name: Esperar a que MongoDB esté listo
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} rollout status deployment/mongodb --timeout=600s"
+      register: rollout_mongo
+      retries: 10
+      delay: 5
+      until: rollout_mongo.rc == 0
+
+    - name: Mostrar PVC/PV de MongoDB
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} get pvc,pv"
+      register: pvc_pv_out
+      changed_when: false
+
+    - name: Imprimir PVC/PV
+      ansible.builtin.debug:
+        var: pvc_pv_out.stdout_lines
