@@ -18,12 +18,33 @@
         state: directory
         mode: '0700'
 
+    - name: Asegurar permisos y propiedad de ~/.ssh
+      ansible.builtin.file:
+        path: "{{ ansible_env.HOME }}/.ssh"
+        state: directory
+        owner: sysadmin
+        group: sysadmin
+        mode: '0700'
+
     - name: Generar par de claves ed25519 en master si no existe
       ansible.builtin.command:
         cmd: "ssh-keygen -t ed25519 -f {{ ansible_env.HOME }}/.ssh/id_ed25519 -N '' -C 'ansible-generated-master-key'"
       args:
         creates: "{{ ansible_env.HOME }}/.ssh/id_ed25519.pub"
 
+
+    - name: Asegurar permisos y propiedad de authorized_keys
+      ansible.builtin.file:
+        path: "{{ ansible_env.HOME }}/.ssh/authorized_keys"
+        owner: sysadmin
+        group: sysadmin
+        mode: '0600'
+
+    - name: Restaurar contexto SELinux si aplica (no falla si no está presente)
+      ansible.builtin.command: restorecon -Rv {{ ansible_env.HOME }}/.ssh
+      args:
+        warn: false
+      failed_when: false
     - name: Asegurar permisos de la clave privada y pública
       ansible.builtin.file:
         path: "{{ item.path }}"
