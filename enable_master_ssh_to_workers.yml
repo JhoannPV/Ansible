@@ -1,14 +1,94 @@
 ---
+# Uso:
+# - Asegúrate de tener un inventory con los grupos `controller` y `workers` (o cambia los nombres de hosts abajo)
+# - Ejecuta desde tu PC (control node) con: ansible-playbook -i inventory.ini enable_master_ssh_to_workers.yml
+# Este playbook hará:
+# 1) En el Master (grupo `controller`): asegura ~/.ssh y genera id_ed25519 si no existe
+# 2) Trae la clave pública desde el Master al controlador (host donde ejecutas Ansible)
+# 3) En los Workers (grupo `workers`): instala esa clave pública en ~/.ssh/authorized_keys para el usuario sysadmin
+
+- name: Generar clave SSH en Master y traer la clave pública
+  hosts: controller
+  gather_facts: true
+  become: false
+  tasks:
+    - name: Asegurar existencia de ~/.ssh en el master
+      ansible.builtin.file:
+        path: "{{ ansible_env.HOME }}/.ssh"
+        state: directory
+        mode: '0700'
+
+    - name: Asegurar permisos y propiedad de ~/.ssh
+      ansible.builtin.file:
+        path: "{{ ansible_env.HOME }}/.ssh"
+        state: directory
+        owner: sysadmin
+        group: sysadmin
+        mode: '0700'
+
+    - name: Generar par de claves ed25519 en master si no existe
+      ansible.builtin.command:
+        cmd: "ssh-keygen -t ed25519 -f {{ ansible_env.HOME }}/.ssh/id_ed25519 -N '' -C 'ansible-generated-master-key'"
+      args:
+        creates: "{{ ansible_env.HOME }}/.ssh/id_ed25519.pub"
+
+    - name: Asegurar permisos de la clave privada y pública
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "{{ ansible_env.HOME }}/.ssh/id_ed25519", mode: '0600' }
+        - { path: "{{ ansible_env.HOME }}/.ssh/id_ed25519.pub", mode: '0644' }
+
+    - name: Traer la clave pública del master al controlador (host que ejecuta ansible)
+      ansible.builtin.fetch:
+        src: "{{ ansible_env.HOME }}/.ssh/id_ed25519.pub"
+        dest: "./master_keys/master_id_ed25519.pub"
+        flat: yes
+
+- name: Instalar la clave pública del master en los workers
+  hosts: workers
+  gather_facts: true
+  become: false
+  tasks:
+    - name: Asegurar existencia de ~/.ssh en el worker
+      ansible.builtin.file:
+        path: "{{ ansible_env.HOME }}/.ssh"
+        state: directory
+        owner: sysadmin
+        group: sysadmin
+        mode: '0700'
+
+    - name: Añadir la clave pública del master a authorized_keys del worker
+      ansible.builtin.authorized_key:
+        user: sysadmin
+        state: present
+        key: "{{ lookup('file', './master_keys/master_id_ed25519.pub') }}"
+        manage_dir: yes
+
+    - name: Asegurar permisos y propiedad de authorized_keys
+      ansible.builtin.file:
+        path: "{{ ansible_env.HOME }}/.ssh/authorized_keys"
+        owner: sysadmin
+        group: sysadmin
+        mode: '0600'
+
+    - name: Restaurar contexto SELinux si aplica (no falla si no está presente)
+      ansible.builtin.command: restorecon -Rv {{ ansible_env.HOME }}/.ssh
+      args:
+        warn: false
+      failed_when: false
+---
   # Uso:
-  # - Asegúrate de tener un inventory con los grupos `k8s_controlplane` y `k8s_workers` (o cambia los nombres de hosts abajo)
+  # - Asegúrate de tener un inventory con los grupos `controller` y `workers` (o cambia los nombres de hosts abajo)
   # - Ejecuta desde tu PC (control node) con: ansible-playbook -i inventory.ini enable_master_ssh_to_workers.yml
   # Este playbook hará:
   # 1) En el Master: asegura ~/.ssh, genera id_ed25519 si no existe y copia la clave pública al controlador (fetch)
   # 2) En los Workers: añade la clave pública del Master a ~/.ssh/authorized_keys para el usuario sysadmin
 
 # Play 1: generar (si es necesario) y traer la clave pública desde el master al nodo de control (control machine)
-- name: Generar clave SSH en Master y traer la clave pública
-  hosts: k8s_controlplane
+ - name: Generar clave SSH en Master y traer la clave pública
+  hosts: controller
   gather_facts: true
   become: false
   tasks:
@@ -60,8 +140,8 @@
         flat: yes
 
 # Play 2: instalar la clave pública del master en los workers
-- name: Instalar la clave pública del master en los workers
-  hosts: k8s_workers
+ - name: Instalar la clave pública del master en los workers
+  hosts: workers
   gather_facts: true
   become: false
   tasks:
