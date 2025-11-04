@@ -55,6 +55,17 @@
     ansible_password: "{{ ssh_password if ssh_password | length > 0 else omit }}"
     ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
   pre_tasks:
+    - name: Probar si podemos usar sudo (become) en los workers
+      ansible.builtin.command: "true"
+      become: true
+      register: sudo_test
+      ignore_errors: true
+      changed_when: false
+
+    - name: Registrar si podemos escalar privilegios
+      ansible.builtin.set_fact:
+        can_become: "{{ sudo_test is defined and sudo_test.rc is defined and sudo_test.rc == 0 }}"
+
     - name: Verificar disponibilidad de sshpass (sólo si se proporciona password)
       ansible.builtin.command: "sshpass -V"
       register: sshpass_check
@@ -87,13 +98,43 @@
       run_once: true
 
   tasks:
-    - name: Asegurar existencia de ~/.ssh en el worker
+    - name: Comprobar estado de ~/.ssh en el worker
+      ansible.builtin.stat:
+        path: "{{ ssh_home }}/.ssh"
+      register: ssh_dir
+
+    - name: Crear ~/.ssh si no existe (sin sudo)
       ansible.builtin.file:
         path: "{{ ssh_home }}/.ssh"
         state: directory
         owner: "{{ ssh_user }}"
         group: "{{ ssh_user }}"
         mode: '0700'
+      when: not ssh_dir.stat.exists
+
+    - name: Corregir propiedad/permiso de ~/.ssh si lo posee root (requiere sudo)
+      ansible.builtin.file:
+        path: "{{ ssh_home }}/.ssh"
+        state: directory
+        owner: "{{ ssh_user }}"
+        group: "{{ ssh_user }}"
+        mode: '0700'
+        recurse: true
+      become: true
+      when:
+        - ssh_dir.stat.exists
+        - ssh_dir.stat.pw_name is defined
+        - ssh_dir.stat.pw_name != ssh_user
+        - can_become | default(false)
+
+    - name: Fallar con instrucción si ~/.ssh es de root y no hay sudo en el worker
+      ansible.builtin.fail:
+        msg: "El directorio {{ ssh_home }}/.ssh pertenece a {{ ssh_dir.stat.pw_name | default('root') }} y no se pudo usar sudo. En el worker ejecuta: sudo chown -R {{ ssh_user }}:{{ ssh_user }} {{ ssh_home }}/.ssh y vuelve a correr el playbook."
+      when:
+        - ssh_dir.stat.exists
+        - ssh_dir.stat.pw_name is defined
+        - ssh_dir.stat.pw_name != ssh_user
+        - not (can_become | default(false))
 
     - name: Añadir la clave pública del master a authorized_keys del worker
       ansible.builtin.authorized_key:
@@ -101,6 +142,7 @@
         state: present
         key: "{{ master_pubkey_content }}"
         manage_dir: yes
+      become: "{{ can_become | default(false) }}"
 
     - name: Asegurar permisos y propiedad de authorized_keys
       ansible.builtin.file:
@@ -108,9 +150,11 @@
         owner: "{{ ssh_user }}"
         group: "{{ ssh_user }}"
         mode: '0600'
+      become: "{{ can_become | default(false) }}"
 
     - name: Restaurar contexto SELinux si aplica (no falla si no está presente)
       ansible.builtin.command: "restorecon -Rv {{ ssh_home }}/.ssh"
       args:
         warn: false
       failed_when: false
+      become: "{{ can_become | default(false) }}"
