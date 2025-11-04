@@ -1,97 +1,99 @@
 ---
-# Uso:
-# - Asegúrate de tener un inventory con los grupos `controller` y `workers`.
-# - Ejecuta desde tu PC (control node) con:
-#     ansible-playbook -i inventory.ini enable_master_ssh_to_workers.yml
+# Ejecuta este playbook DESDE la máquina master (control node) usando sudo si deseas:
+#   sudo ansible-playbook -i inventory.ini enable_master_ssh_to_workers.yml
+# Requisitos para primera conexión a workers:
+# - Ya sea que exista alguna llave válida para sysadmin, o proporciona la
+#   variable 'ssh_password' (instala 'sshpass' en el master).
 
-- name: Generar clave SSH en Master y traer la clave pública
-  hosts: controller
+- name: Preparar llave SSH del usuario sysadmin en el master (local)
+
+  hosts: localhost
+  connection: local
   gather_facts: false
-  become: false
+  become: true
   vars:
-    # Forzar configuración de conexión incluso si se ejecuta con sudo (root)
-    ansible_connection: ssh
-    ansible_user: sysadmin
-    ansible_ssh_private_key_file: "/home/jhoann-bohorquez/.ssh/id_ed25519"
-    ansible_become: false
-    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-
-    # Usuario/paths en el host remoto (controller)
-    ssh_user: "{{ ansible_user }}"
+    ssh_user: "{{ lookup('env','SUDO_USER') | default('sysadmin', true) }}"
     ssh_home: "{{ '/root' if ssh_user == 'root' else '/home/' + ssh_user }}"
-    master_keys_dir: "{{ playbook_dir }}/master_keys"
-    master_pubkey_path: "{{ master_keys_dir }}/master_id_ed25519.pub"
   tasks:
-    - name: Asegurar directorio local para guardar la clave pública (control node)
-      ansible.builtin.file:
-        path: "{{ master_keys_dir }}"
-        state: directory
-        mode: '0755'
-      delegate_to: localhost
-      run_once: true
-
-    - name: Asegurar existencia de ~/.ssh en el master
+    - name: Asegurar ~/.ssh del usuario en el master
       ansible.builtin.file:
         path: "{{ ssh_home }}/.ssh"
         state: directory
+        owner: "{{ ssh_user }}"
+        group: "{{ ssh_user }}"
         mode: '0700'
 
-    - name: Generar par de claves ed25519 en master si no existe
-      ansible.builtin.command: "ssh-keygen -t ed25519 -f {{ ssh_home }}/.ssh/id_ed25519 -N '' -C 'ansible-generated-master-key'"
+    - name: Generar par de claves ed25519 si no existe (en el master)
+      become_user: "{{ ssh_user }}"
+      ansible.builtin.command: "ssh-keygen -t ed25519 -f {{ ssh_home }}/.ssh/id_ed25519 -N '' -C 'ansible-generated'"
       args:
         creates: "{{ ssh_home }}/.ssh/id_ed25519.pub"
 
-    - name: Asegurar permisos de la clave privada y pública
+    - name: Asegurar permisos de claves en el master
       ansible.builtin.file:
         path: "{{ item.path }}"
         mode: "{{ item.mode }}"
+        owner: "{{ ssh_user }}"
+        group: "{{ ssh_user }}"
       loop:
         - { path: "{{ ssh_home }}/.ssh/id_ed25519", mode: '0600' }
         - { path: "{{ ssh_home }}/.ssh/id_ed25519.pub", mode: '0644' }
-
-    - name: Traer la clave pública del master al controlador
-      ansible.builtin.fetch:
-        src: "{{ ssh_home }}/.ssh/id_ed25519.pub"
-        dest: "{{ master_pubkey_path }}"
-        flat: yes
 
 - name: Instalar la clave pública del master en los workers
   hosts: workers
   gather_facts: false
   become: false
+  vars_prompt:
+    - name: "ssh_password"
+      prompt: "Password de sysadmin en los workers (deja vacío si ya tienes acceso por llave)"
+      private: yes
+      default: ""
   vars:
-    # Forzar configuración de conexión incluso si se ejecuta con sudo (root)
-    ansible_connection: ssh
-    ansible_user: sysadmin
-    ansible_ssh_private_key_file: "/home/jhoann-bohorquez/.ssh/id_ed25519"
-    ansible_become: false
-    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-
-    # Usuario/paths en los hosts remotos (workers)
-    ssh_user: "{{ ansible_user }}"
+    ssh_user: "sysadmin"
     ssh_home: "{{ '/root' if ssh_user == 'root' else '/home/' + ssh_user }}"
-    master_pubkey_path: "{{ playbook_dir }}/master_keys/master_id_ed25519.pub"
+    master_pubkey_content: "{{ lookup('file', '/home/' + ssh_user + '/.ssh/id_ed25519.pub') }}"
+    ansible_password: "{{ ssh_password if ssh_password | length > 0 else omit }}"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+  pre_tasks:
+    - name: Verificar disponibilidad de sshpass cuando se usa password
+      ansible.builtin.command: "sshpass -V"
+      register: sshpass_check
+      changed_when: false
+      failed_when: false
+      delegate_to: localhost
+      run_once: true
+
+    - name: Fallar si se proporcionó password y no está sshpass
+      ansible.builtin.fail:
+        msg: "Se requiere 'sshpass' en el master para autenticación por contraseña. Instálalo y vuelve a ejecutar."
+      when:
+        - ssh_password is defined
+        - ssh_password | length > 0
+        - sshpass_check.rc != 0
+      delegate_to: localhost
+      run_once: true
+
   tasks:
     - name: Asegurar existencia de ~/.ssh en el worker
       ansible.builtin.file:
         path: "{{ ssh_home }}/.ssh"
         state: directory
-        owner: sysadmin
-        group: sysadmin
+        owner: "{{ ssh_user }}"
+        group: "{{ ssh_user }}"
         mode: '0700'
 
     - name: Añadir la clave pública del master a authorized_keys del worker
       ansible.builtin.authorized_key:
-        user: sysadmin
+        user: "{{ ssh_user }}"
         state: present
-        key: "{{ lookup('file', master_pubkey_path) }}"
+        key: "{{ master_pubkey_content }}"
         manage_dir: yes
 
     - name: Asegurar permisos y propiedad de authorized_keys
       ansible.builtin.file:
         path: "{{ ssh_home }}/.ssh/authorized_keys"
-        owner: sysadmin
-        group: sysadmin
+        owner: "{{ ssh_user }}"
+        group: "{{ ssh_user }}"
         mode: '0600'
 
     - name: Restaurar contexto SELinux si aplica (no falla si no está presente)
