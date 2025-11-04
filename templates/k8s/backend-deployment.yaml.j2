@@ -30,7 +30,7 @@ spec:
       containers:
         - name: backend
           image: {{ BACKEND_IMAGE }}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 3001
           envFrom:

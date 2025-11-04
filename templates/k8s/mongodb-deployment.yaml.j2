@@ -21,7 +21,7 @@ spec:
       containers:
         - name: mongodb
           image: {{ MONGODB_IMAGE }}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 27017
           securityContext:
