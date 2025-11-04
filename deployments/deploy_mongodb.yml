@@ -1,6 +1,7 @@
 ---
 - name: Actualizar solo MongoDB (Calendar) en MicroK8s
   hosts: controller
+  connection: local
   vars_files:
     - ../vars/env.yml
 
