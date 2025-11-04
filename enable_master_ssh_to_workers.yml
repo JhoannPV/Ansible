@@ -55,20 +55,33 @@
     ansible_password: "{{ ssh_password if ssh_password | length > 0 else omit }}"
     ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
   pre_tasks:
-    - name: Verificar disponibilidad de sshpass cuando se usa password
+    - name: Verificar disponibilidad de sshpass (sólo si se proporciona password)
       ansible.builtin.command: "sshpass -V"
       register: sshpass_check
       changed_when: false
       failed_when: false
       delegate_to: localhost
       run_once: true
-
-    - name: Fallar si se proporcionó password y no está sshpass
-      ansible.builtin.fail:
-        msg: "Se requiere 'sshpass' en el master para autenticación por contraseña. Instálalo y vuelve a ejecutar."
       when:
         - ssh_password is defined
         - ssh_password | length > 0
+
+    - name: Usar password sólo si sshpass está disponible
+      ansible.builtin.set_fact:
+        ansible_password: "{{ ssh_password }}"
+      when:
+        - ssh_password is defined
+        - ssh_password | length > 0
+        - sshpass_check is defined
+        - sshpass_check.rc == 0
+
+    - name: Aviso si se proporcionó password pero falta sshpass (se intentará con llaves)
+      ansible.builtin.debug:
+        msg: "Se proporcionó password pero 'sshpass' no está disponible en el master; intentaré conectarme por llave. Instala sshpass o habilita clave pública."
+      when:
+        - ssh_password is defined
+        - ssh_password | length > 0
+        - sshpass_check is defined
         - sshpass_check.rc != 0
       delegate_to: localhost
       run_once: true
