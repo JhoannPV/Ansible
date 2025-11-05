@@ -7,6 +7,8 @@ metadata:
     app: mongodb
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: mongodb
@@ -15,6 +17,7 @@ spec:
       labels:
         app: mongodb
     spec:
+      terminationGracePeriodSeconds: 30
       securityContext:
         fsGroup: 999
         fsGroupChangePolicy: OnRootMismatch
@@ -28,6 +31,10 @@ spec:
             runAsUser: 999
             runAsGroup: 999
             allowPrivilegeEscalation: false
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 10"]
           env:
             - name: MONGO_INITDB_ROOT_USERNAME
               valueFrom:
