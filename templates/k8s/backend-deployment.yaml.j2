@@ -17,16 +17,16 @@ spec:
     spec:
       initContainers:
         - name: wait-for-mongo
-          image: busybox:1.36.1
+          image: alpine:3.20
           command: ["/bin/sh","-c"]
           args:
             - >-
+              set -e;
+              echo "Instalando netcat...";
+              apk add --no-cache netcat-openbsd >/dev/null 2>&1;
               echo "Esperando a mongo-db:27017...";
               until nc -z mongo-db 27017; do echo "mongo-db no disponible, reintentando..."; sleep 2; done;
               echo "mongo-db disponible";
-          # Algunas imágenes de busybox no traen nc por defecto, instalarlo si falta
-          # Para máxima compatibilidad, usamos timeout en telnet si nc no existe
-          # Pero mantenemos nc por simplicidad; si falla, las tareas de debug lo reflejarán
       containers:
         - name: backend
           image: {{ BACKEND_IMAGE }}
@@ -37,15 +37,17 @@ spec:
             - secretRef:
                 name: app-env
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /api/healthz
               port: 3001
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /api/healthz
               port: 3001
-            initialDelaySeconds: 10
-            periodSeconds: 20
+            initialDelaySeconds: 15
+            periodSeconds: 30
           resources:
             requests:
               cpu: "100m"
