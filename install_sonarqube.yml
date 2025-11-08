@@ -82,8 +82,25 @@
       delay: 5
       until: apply_sonar.rc == 0
 
-    - name: Esperar a que SonarQube esté listo (timeout extendido)
-      ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} rollout status deployment/sonarqube --timeout=1500s"
+    - block:
+        - name: Esperar a que SonarQube esté listo (timeout extendido)
+          ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} rollout status deployment/sonarqube --timeout=1500s"
+      rescue:
+        - name: DIAGNÓSTICO deployment sonarqube (describe)
+          ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} describe deployment/sonarqube"
+          changed_when: false
+        - name: DIAGNÓSTICO replicas y pods
+          ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} get rs,pods -l app=sonarqube -o wide"
+          changed_when: false
+        - name: DIAGNÓSTICO eventos recientes
+          ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} get events --sort-by=.lastTimestamp"
+          changed_when: false
+        - name: DIAGNÓSTICO logs últimos 200 líneas
+          ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} logs deploy/sonarqube --tail=200"
+          changed_when: false
+        - name: Forzar fallo tras diagnóstico
+          ansible.builtin.fail:
+            msg: "SonarQube no alcanzó readiness dentro del tiempo. Ver diagnóstico anterior para causas (memoria, permisos, DB, probes)."
 
     - name: Mostrar servicio de SonarQube (ClusterIP)
       ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} get svc sonarqube -o wide"
