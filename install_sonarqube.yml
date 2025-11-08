@@ -19,6 +19,18 @@
           - SONAR_DB_NAME is defined and SONAR_DB_NAME | length > 0
         fail_msg: "Faltan variables en vars/sonarqube.yml (SONAR_NAMESPACE, SONAR_DB_USER, SONAR_DB_PASSWORD, SONAR_DB_NAME)"
 
+    - name: Esperar a que MicroK8s esté listo
+      ansible.builtin.command: microk8s status --wait-ready
+      changed_when: false
+
+    - name: Comprobar acceso al API de Kubernetes (warm-up)
+      ansible.builtin.command: microk8s kubectl get ns
+      register: warmup
+      changed_when: false
+      retries: 5
+      delay: 3
+      until: warmup.rc == 0
+
   tasks:
     - name: Crear directorio temporal para manifests
       ansible.builtin.file:
@@ -53,14 +65,22 @@
     - name: Aplicar Secret DB
       ansible.builtin.command: "microk8s kubectl apply -f {{ k8s_tmp_dir }}/01-db-secret.yaml"
 
-    - name: Desplegar PostgreSQL
+    - name: Desplegar PostgreSQL (con reintentos)
       ansible.builtin.command: "microk8s kubectl apply -f {{ k8s_tmp_dir }}/10-postgres.yaml"
+      register: apply_pg
+      retries: 5
+      delay: 5
+      until: apply_pg.rc == 0
 
     - name: Esperar a que PostgreSQL esté listo
       ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} rollout status deployment/sonar-postgres --timeout=600s"
 
-    - name: Desplegar SonarQube
+    - name: Desplegar SonarQube (con reintentos)
       ansible.builtin.command: "microk8s kubectl apply -f {{ k8s_tmp_dir }}/20-sonarqube.yaml"
+      register: apply_sonar
+      retries: 5
+      delay: 5
+      until: apply_sonar.rc == 0
 
     - name: Esperar a que SonarQube esté listo
       ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} rollout status deployment/sonarqube --timeout=900s"
