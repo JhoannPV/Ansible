@@ -87,6 +87,11 @@
         src: templates/k8s/sonarqube.yaml.j2
         dest: "{{ k8s_tmp_dir }}/20-sonarqube.yaml"
 
+    - name: Eliminar deployment SonarQube previo (si existe)
+      ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} delete deployment/sonarqube --ignore-not-found=true"
+      changed_when: true
+      failed_when: false
+
     - name: Aplicar Namespace
       ansible.builtin.command: "microk8s kubectl apply -f {{ k8s_tmp_dir }}/00-namespace.yaml"
 
@@ -161,6 +166,26 @@
           changed_when: false
         - name: DIAGNÓSTICO logs últimos 200 líneas
           ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} logs deploy/sonarqube --tail=200"
+          changed_when: false
+        - name: DIAGNÓSTICO logs initContainers (volume-permissions)
+          ansible.builtin.shell: |
+            POD=$(microk8s kubectl -n {{ SONAR_NAMESPACE }} get pods -l app=sonarqube -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            if [ -n "$POD" ]; then
+              echo "===== logs init: volume-permissions =====";
+              microk8s kubectl -n {{ SONAR_NAMESPACE }} logs "$POD" -c volume-permissions --tail=100 || true
+            else
+              echo "No hay Pod sonarqube para logs de init"
+            fi
+          changed_when: false
+        - name: DIAGNÓSTICO logs initContainers (wait-for-postgres)
+          ansible.builtin.shell: |
+            POD=$(microk8s kubectl -n {{ SONAR_NAMESPACE }} get pods -l app=sonarqube -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            if [ -n "$POD" ]; then
+              echo "===== logs init: wait-for-postgres =====";
+              microk8s kubectl -n {{ SONAR_NAMESPACE }} logs "$POD" -c wait-for-postgres --tail=100 || true
+            else
+              echo "No hay Pod sonarqube para logs de init"
+            fi
           changed_when: false
         - name: DIAGNÓSTICO logs internos de SonarQube (sonar/web/ce/es)
           ansible.builtin.shell: |
