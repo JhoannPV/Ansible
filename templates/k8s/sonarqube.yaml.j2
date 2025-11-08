@@ -65,9 +65,20 @@ spec:
           command: ["sh","-c"]
           args:
             - |
-              echo "Esperando a sonar-postgres:5432 ...";
-              until pg_isready -h sonar-postgres -p 5432 -U "$POSTGRES_USER"; do echo "DB no lista"; sleep 3; done;
-              echo "DB lista";
+              echo "[wait-for-postgres] Usuario: $POSTGRES_USER";
+              echo "[wait-for-postgres] Esperando a sonar-postgres:5432 (timeout 300s)";
+              END=$((SECONDS+300));
+              while true; do
+                if pg_isready -h sonar-postgres -p 5432 -U "$POSTGRES_USER"; then
+                  echo "[wait-for-postgres] DB lista"; break;
+                else
+                  echo "[wait-for-postgres] DB no lista, reintentando...";
+                fi;
+                if [ $SECONDS -ge $END ]; then
+                  echo "[wait-for-postgres] Timeout esperando Postgres"; exit 1;
+                fi;
+                sleep 5;
+              done;
       containers:
         - name: sonarqube
           image: sonarqube:10.6.0-community
