@@ -25,12 +25,16 @@ metadata:
   namespace: {{ SONAR_NAMESPACE }}
 spec:
   replicas: 1
+  progressDeadlineSeconds: 1800
+  strategy:
+    type: Recreate
   selector:
     matchLabels: { app: sonarqube }
   template:
     metadata:
       labels: { app: sonarqube }
     spec:
+      terminationGracePeriodSeconds: 120
       securityContext:
         fsGroup: 1000
         runAsUser: 1000
@@ -51,17 +55,25 @@ spec:
             # Ajustes recomendados para entornos con memoria limitada / evitar GC agresivo
             - name: SONAR_SEARCH_JAVAADDITIONALOPTS
               value: "-Dnode.store.allow_mmap=false"
+            - name: SONAR_WEB_JAVAOPTS
+              value: "-Xms512m -Xmx512m"
+            - name: SONAR_CE_JAVAOPTS
+              value: "-Xms512m -Xmx512m"
           ports:
             - containerPort: 9000
+          startupProbe:
+            httpGet: { path: /, port: 9000 }
+            periodSeconds: 20
+            failureThreshold: 45   # ~15 min
           readinessProbe:
             httpGet: { path: /, port: 9000 }
-            initialDelaySeconds: 120
-            periodSeconds: 15
-            timeoutSeconds: 3
-            failureThreshold: 6
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
           livenessProbe:
             httpGet: { path: /, port: 9000 }
-            initialDelaySeconds: 180
+            initialDelaySeconds: 300
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 6
