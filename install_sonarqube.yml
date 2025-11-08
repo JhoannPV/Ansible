@@ -31,6 +31,19 @@
       delay: 3
       until: warmup.rc == 0
 
+    - name: Ajustar vm.max_map_count para SonarQube (recomendado)
+      become: true
+      ansible.builtin.shell: |
+        set -e
+        sysctl -w vm.max_map_count=524288
+        grep -q '^vm.max_map_count' /etc/sysctl.d/99-sonarqube.conf 2>/dev/null || echo 'vm.max_map_count=524288' > /etc/sysctl.d/99-sonarqube.conf
+        sysctl --system >/dev/null 2>&1 || true
+      args:
+        executable: /bin/bash
+      changed_when: false
+      failed_when: false
+      tags: [sysctl]
+
   tasks:
     - name: Crear directorio temporal para manifests
       ansible.builtin.file:

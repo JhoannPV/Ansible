@@ -55,6 +55,8 @@ spec:
             # Ajustes recomendados para entornos con memoria limitada / evitar GC agresivo
             - name: SONAR_SEARCH_JAVAADDITIONALOPTS
               value: "-Dnode.store.allow_mmap=false"
+            - name: SONAR_SEARCH_JAVAOPTS
+              value: "-Xms512m -Xmx512m -Dnode.store.allow_mmap=false"
             - name: SONAR_WEB_JAVAOPTS
               value: "-Xms512m -Xmx512m"
             - name: SONAR_CE_JAVAOPTS
@@ -83,6 +85,12 @@ spec:
       volumes:
         - { name: sonar-data, persistentVolumeClaim: { claimName: sonarqube-data-pvc } }
         - { name: sonar-ext,  persistentVolumeClaim: { claimName: sonarqube-ext-pvc } }
+{% if SONAR_NODE_SELECTOR is defined and SONAR_NODE_SELECTOR %}
+  nodeSelector:
+{% for k,v in SONAR_NODE_SELECTOR.items() %}
+    {{ k }}: {{ v | quote }}
+{% endfor %}
+{% endif %}
 ---
 apiVersion: v1
 kind: Service
