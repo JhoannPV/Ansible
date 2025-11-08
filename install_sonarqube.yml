@@ -82,8 +82,8 @@
       delay: 5
       until: apply_sonar.rc == 0
 
-    - name: Esperar a que SonarQube esté listo
-      ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} rollout status deployment/sonarqube --timeout=900s"
+    - name: Esperar a que SonarQube esté listo (timeout extendido)
+      ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} rollout status deployment/sonarqube --timeout=1500s"
 
     - name: Mostrar servicio de SonarQube (ClusterIP)
       ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} get svc sonarqube -o wide"

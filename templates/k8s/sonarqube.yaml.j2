@@ -32,7 +32,9 @@ spec:
       labels: { app: sonarqube }
     spec:
       securityContext:
-        fsGroup: 999
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsGroup: 1000
       containers:
         - name: sonarqube
           image: sonarqube:10.6.0-community
@@ -46,16 +48,23 @@ spec:
               valueFrom: { secretKeyRef: { name: sonarqube-db-secret, key: POSTGRES_USER } }
             - name: SONAR_JDBC_PASSWORD
               valueFrom: { secretKeyRef: { name: sonarqube-db-secret, key: POSTGRES_PASSWORD } }
+            # Ajustes recomendados para entornos con memoria limitada / evitar GC agresivo
+            - name: SONAR_SEARCH_JAVAADDITIONALOPTS
+              value: "-Dnode.store.allow_mmap=false"
           ports:
             - containerPort: 9000
           readinessProbe:
             httpGet: { path: /, port: 9000 }
-            initialDelaySeconds: 30
-            periodSeconds: 10
+            initialDelaySeconds: 120
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 6
           livenessProbe:
             httpGet: { path: /, port: 9000 }
-            initialDelaySeconds: 60
-            periodSeconds: 20
+            initialDelaySeconds: 180
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
           volumeMounts:
             - { name: sonar-data, mountPath: /opt/sonarqube/data }
             - { name: sonar-ext,  mountPath: /opt/sonarqube/extensions }
