@@ -38,16 +38,18 @@ spec:
       securityContext:
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
-        runAsUser: 1000
-        runAsGroup: 1000
       initContainers:
         - name: volume-permissions
           image: busybox:1.36.1
           command: ["sh","-c"]
           args:
             - |
-              chown -R 1000:1000 /opt/sonarqube/data || true;
-              chown -R 1000:1000 /opt/sonarqube/extensions || true;
+              echo "Ajustando permisos en volúmenes SonarQube";
+              for d in data extensions logs; do
+                if [ -d "/opt/sonarqube/$d" ]; then
+                  chown -R 1000:1000 /opt/sonarqube/$d || true;
+                fi;
+              done;
           securityContext:
             runAsUser: 0
           volumeMounts:
@@ -70,8 +72,9 @@ spec:
         - name: sonarqube
           image: sonarqube:10.6.0-community
           resources:
-            requests: { cpu: "500m", memory: "1536Mi" }
-            limits:   { cpu: "1500m", memory: "3Gi" }
+            # Reducido para entorno de laboratorio / nodo con RAM limitada
+            requests: { cpu: "300m", memory: "1024Mi" }
+            limits:   { cpu: "1000m", memory: "2048Mi" }
           env:
             - name: SONAR_JDBC_URL
               value: jdbc:postgresql://sonar-postgres.{{ SONAR_NAMESPACE }}.svc.cluster.local:5432/{{ SONAR_DB_NAME }}
@@ -83,11 +86,11 @@ spec:
             - name: SONAR_SEARCH_JAVAADDITIONALOPTS
               value: "-Dnode.store.allow_mmap=false"
             - name: SONAR_SEARCH_JAVAOPTS
-              value: "-Xms512m -Xmx512m -Dnode.store.allow_mmap=false"
+              value: "-Xms256m -Xmx256m -Dnode.store.allow_mmap=false"
             - name: SONAR_WEB_JAVAOPTS
-              value: "-Xms512m -Xmx512m"
+              value: "-Xms384m -Xmx384m"
             - name: SONAR_CE_JAVAOPTS
-              value: "-Xms512m -Xmx512m"
+              value: "-Xms384m -Xmx384m"
           ports:
             - containerPort: 9000
           startupProbe:

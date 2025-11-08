@@ -105,8 +105,39 @@
         - name: DIAGNÓSTICO replicas y pods
           ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} get rs,pods -l app=sonarqube -o wide"
           changed_when: false
+        - name: DIAGNÓSTICO describe ReplicaSet SonarQube (si existe)
+          ansible.builtin.shell: |
+            set -e
+            RS=$(microk8s kubectl -n {{ SONAR_NAMESPACE }} get rs -l app=sonarqube -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            if [ -n "$RS" ]; then
+              microk8s kubectl -n {{ SONAR_NAMESPACE }} describe rs "$RS" || true
+            else
+              echo "No hay ReplicaSet sonarqube aún"
+            fi
+          changed_when: false
+        - name: DIAGNÓSTICO describe Pod SonarQube (si existe)
+          ansible.builtin.shell: |
+            set -e
+            POD=$(microk8s kubectl -n {{ SONAR_NAMESPACE }} get pods -l app=sonarqube -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            if [ -n "$POD" ]; then
+              microk8s kubectl -n {{ SONAR_NAMESPACE }} describe pod "$POD" || true
+            else
+              echo "No hay Pod sonarqube aún"
+            fi
+          changed_when: false
         - name: DIAGNÓSTICO eventos recientes
           ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} get events --sort-by=.lastTimestamp"
+          changed_when: false
+        - name: DIAGNÓSTICO eventos Scheduling / OOM
+          ansible.builtin.shell: |
+            microk8s kubectl -n {{ SONAR_NAMESPACE }} get events --sort-by=.lastTimestamp | egrep -i 'FailedScheduling|Insufficient|evict|Preempt|OOM|BackOff' || true
+          changed_when: false
+        - name: DIAGNÓSTICO PVC y PV relacionados
+          ansible.builtin.shell: |
+            echo 'PVC:'
+            microk8s kubectl -n {{ SONAR_NAMESPACE }} get pvc || true
+            echo 'PV (filtrado sonarqube):'
+            microk8s kubectl get pv | egrep -i 'sonarqube|NAME' || true
           changed_when: false
         - name: DIAGNÓSTICO logs últimos 200 líneas
           ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} logs deploy/sonarqube --tail=200"
