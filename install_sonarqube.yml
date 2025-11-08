@@ -1,4 +1,27 @@
----
+- name: Preparar nodos para SonarQube (sysctl vm.max_map_count)
+  hosts: controller,workers
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Establecer vm.max_map_count=524288 (runtime)
+      ansible.builtin.command: sysctl -w vm.max_map_count=524288
+      changed_when: false
+      failed_when: false
+    - name: Persistir vm.max_map_count en /etc/sysctl.d/99-sonarqube.conf
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-sonarqube.conf
+        content: |
+          vm.max_map_count=524288
+        owner: root
+        group: root
+        mode: '0644'
+      failed_when: false
+    - name: Aplicar configuración sysctl persistente
+      ansible.builtin.command: sysctl --system
+      changed_when: false
+      failed_when: false
+
 - name: Instalar SonarQube self-hosted en MicroK8s
   hosts: controller
   gather_facts: false
@@ -31,18 +54,10 @@
       delay: 3
       until: warmup.rc == 0
 
-    - name: Ajustar vm.max_map_count para SonarQube (recomendado)
-      become: true
-      ansible.builtin.shell: |
-        set -e
-        sysctl -w vm.max_map_count=524288
-        grep -q '^vm.max_map_count' /etc/sysctl.d/99-sonarqube.conf 2>/dev/null || echo 'vm.max_map_count=524288' > /etc/sysctl.d/99-sonarqube.conf
-        sysctl --system >/dev/null 2>&1 || true
-      args:
-        executable: /bin/bash
+    - name: Verificar acceso a kubernetes desde el controlador
+      ansible.builtin.command: microk8s kubectl version --client=true --output=yaml
       changed_when: false
       failed_when: false
-      tags: [sysctl]
 
   tasks:
     - name: Crear directorio temporal para manifests
@@ -141,6 +156,16 @@
           changed_when: false
         - name: DIAGNÓSTICO logs últimos 200 líneas
           ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} logs deploy/sonarqube --tail=200"
+          changed_when: false
+        - name: DIAGNÓSTICO logs previos del contenedor (si hubo reinicios)
+          ansible.builtin.shell: |
+            set -e
+            POD=$(microk8s kubectl -n {{ SONAR_NAMESPACE }} get pods -l app=sonarqube -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            if [ -n "$POD" ]; then
+              microk8s kubectl -n {{ SONAR_NAMESPACE }} logs "$POD" -c sonarqube --previous --tail=200 || true
+            else
+              echo "No hay Pod sonarqube para logs previos"
+            fi
           changed_when: false
         - name: Forzar fallo tras diagnóstico
           ansible.builtin.fail:
