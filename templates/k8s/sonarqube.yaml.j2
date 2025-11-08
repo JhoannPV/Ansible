@@ -35,6 +35,7 @@ spec:
       labels: { app: sonarqube }
     spec:
       terminationGracePeriodSeconds: 120
+      restartPolicy: Always
       securityContext:
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
@@ -102,6 +103,8 @@ spec:
               value: "-Xms384m -Xmx384m"
             - name: SONAR_CE_JAVAOPTS
               value: "-Xms384m -Xmx384m"
+            - name: SONAR_ES_BOOTSTRAP_CHECKS_DISABLE
+              value: "true"
           ports:
             - containerPort: 9000
           startupProbe:

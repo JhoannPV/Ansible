@@ -4,6 +4,10 @@ SONAR_DB_PASSWORD: "cambia_esta_contra"
 SONAR_DB_NAME: "sonarqube"
 SONAR_HOSTNAME: "sonarqube.local"  # usado por el Ingress
 
+# (Opcional) Resetear almacenamiento persistente si hay corrupción o estados previos
+# Advertencia: Esto borrará datos/índices de SonarQube almacenados en los PVCs
+SONAR_RESET_PERSISTENCE: false
+
 # (Opcional) Forzar el nodo donde correrá SonarQube (útil si aplicaste sysctl solo en un nodo)
 # SONAR_NODE_SELECTOR:
 #   kubernetes.io/hostname: "k8s-worker-01"
