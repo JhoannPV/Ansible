@@ -110,6 +110,11 @@
       delay: 5
       until: apply_sonar.rc == 0
 
+    - name: Forzar reinicio controlado de SonarQube (rollout restart)
+      ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} rollout restart deployment/sonarqube"
+      changed_when: true
+      failed_when: false
+
     - block:
         - name: Esperar a que SonarQube esté listo (timeout extendido)
           ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} rollout status deployment/sonarqube --timeout=1500s"
@@ -156,6 +161,20 @@
           changed_when: false
         - name: DIAGNÓSTICO logs últimos 200 líneas
           ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} logs deploy/sonarqube --tail=200"
+          changed_when: false
+        - name: DIAGNÓSTICO logs internos de SonarQube (sonar/web/ce/es)
+          ansible.builtin.shell: |
+            set -e
+            POD=$(microk8s kubectl -n {{ SONAR_NAMESPACE }} get pods -l app=sonarqube -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            if [ -n "$POD" ]; then
+              for f in sonar.log web.log ce.log es.log; do
+                echo "===== /opt/sonarqube/logs/$f =====";
+                microk8s kubectl -n {{ SONAR_NAMESPACE }} exec "$POD" -- sh -c "[ -f /opt/sonarqube/logs/$f ] && tail -n 200 /opt/sonarqube/logs/$f || echo 'no existe'" || true;
+                echo;
+              done
+            else
+              echo "No hay Pod sonarqube para extraer logs internos"
+            fi
           changed_when: false
         - name: DIAGNÓSTICO logs previos del contenedor (si hubo reinicios)
           ansible.builtin.shell: |
