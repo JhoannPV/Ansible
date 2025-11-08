@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sonarqube-data-pvc
+  namespace: {{ SONAR_NAMESPACE }}
+spec:
+  accessModes: [ "ReadWriteOnce" ]
+  storageClassName: microk8s-hostpath
+  resources: { requests: { storage: 10Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sonarqube-ext-pvc
+  namespace: {{ SONAR_NAMESPACE }}
+spec:
+  accessModes: [ "ReadWriteOnce" ]
+  storageClassName: microk8s-hostpath
+  resources: { requests: { storage: 2Gi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sonarqube
+  namespace: {{ SONAR_NAMESPACE }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: sonarqube }
+  template:
+    metadata:
+      labels: { app: sonarqube }
+    spec:
+      securityContext:
+        fsGroup: 999
+      containers:
+        - name: sonarqube
+          image: sonarqube:10.6.0-community
+          resources:
+            requests: { cpu: "1000m", memory: "2Gi" }
+            limits:   { cpu: "2000m", memory: "4Gi" }
+          env:
+            - name: SONAR_JDBC_URL
+              value: jdbc:postgresql://sonar-postgres.{{ SONAR_NAMESPACE }}.svc.cluster.local:5432/{{ SONAR_DB_NAME }}
+            - name: SONAR_JDBC_USERNAME
+              valueFrom: { secretKeyRef: { name: sonarqube-db-secret, key: POSTGRES_USER } }
+            - name: SONAR_JDBC_PASSWORD
+              valueFrom: { secretKeyRef: { name: sonarqube-db-secret, key: POSTGRES_PASSWORD } }
+          ports:
+            - containerPort: 9000
+          readinessProbe:
+            httpGet: { path: /, port: 9000 }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /, port: 9000 }
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          volumeMounts:
+            - { name: sonar-data, mountPath: /opt/sonarqube/data }
+            - { name: sonar-ext,  mountPath: /opt/sonarqube/extensions }
+      volumes:
+        - { name: sonar-data, persistentVolumeClaim: { claimName: sonarqube-data-pvc } }
+        - { name: sonar-ext,  persistentVolumeClaim: { claimName: sonarqube-ext-pvc } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sonarqube
+  namespace: {{ SONAR_NAMESPACE }}
+spec:
+  type: ClusterIP
+  selector: { app: sonarqube }
+  ports:
+    - name: web
+      port: 9000
+      targetPort: 9000

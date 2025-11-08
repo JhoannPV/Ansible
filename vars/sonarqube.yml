@@ -1,0 +1,5 @@
+SONAR_NAMESPACE: "sonarqube"
+SONAR_DB_USER: "sonar"
+SONAR_DB_PASSWORD: "cambia_esta_contra"
+SONAR_DB_NAME: "sonarqube"
+SONAR_HOSTNAME: "sonarqube.local"  # usado por el Ingress

@@ -1,0 +1,69 @@
+---
+- name: Instalar SonarQube self-hosted en MicroK8s
+  hosts: controller
+  gather_facts: false
+
+  vars_files:
+    - vars/sonarqube.yml
+
+  vars:
+    k8s_tmp_dir: "/tmp/sonarqube-k8s"
+
+  pre_tasks:
+    - name: Validar variables requeridas
+      ansible.builtin.assert:
+        that:
+          - SONAR_NAMESPACE is defined and SONAR_NAMESPACE | length > 0
+          - SONAR_DB_USER is defined and SONAR_DB_USER | length > 0
+          - SONAR_DB_PASSWORD is defined and SONAR_DB_PASSWORD | length > 0
+          - SONAR_DB_NAME is defined and SONAR_DB_NAME | length > 0
+        fail_msg: "Faltan variables en vars/sonarqube.yml (SONAR_NAMESPACE, SONAR_DB_USER, SONAR_DB_PASSWORD, SONAR_DB_NAME)"
+
+  tasks:
+    - name: Crear directorio temporal para manifests
+      ansible.builtin.file:
+        path: "{{ k8s_tmp_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Render Namespace
+      ansible.builtin.template:
+        src: templates/k8s/sonarqube-namespace.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/00-namespace.yaml"
+
+    - name: Render Secret de Base de Datos
+      ansible.builtin.template:
+        src: templates/k8s/sonarqube-db-secret.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/01-db-secret.yaml"
+      no_log: true
+
+    - name: Render PostgreSQL (PVC + Deployment + Service)
+      ansible.builtin.template:
+        src: templates/k8s/sonarqube-postgres.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/10-postgres.yaml"
+
+    - name: Render SonarQube (PVCs + Deployment + Service)
+      ansible.builtin.template:
+        src: templates/k8s/sonarqube.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/20-sonarqube.yaml"
+
+    - name: Aplicar Namespace
+      ansible.builtin.command: "microk8s kubectl apply -f {{ k8s_tmp_dir }}/00-namespace.yaml"
+
+    - name: Aplicar Secret DB
+      ansible.builtin.command: "microk8s kubectl apply -f {{ k8s_tmp_dir }}/01-db-secret.yaml"
+
+    - name: Desplegar PostgreSQL
+      ansible.builtin.command: "microk8s kubectl apply -f {{ k8s_tmp_dir }}/10-postgres.yaml"
+
+    - name: Esperar a que PostgreSQL esté listo
+      ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} rollout status deployment/sonar-postgres --timeout=600s"
+
+    - name: Desplegar SonarQube
+      ansible.builtin.command: "microk8s kubectl apply -f {{ k8s_tmp_dir }}/20-sonarqube.yaml"
+
+    - name: Esperar a que SonarQube esté listo
+      ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} rollout status deployment/sonarqube --timeout=900s"
+
+    - name: Mostrar servicio de SonarQube (ClusterIP)
+      ansible.builtin.command: "microk8s kubectl -n {{ SONAR_NAMESPACE }} get svc sonarqube -o wide"
