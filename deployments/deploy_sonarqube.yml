@@ -26,9 +26,8 @@
           * hard nofile 131072
         owner: root
         group: root
-        mode: '0644'
+  mode: '0644'
 
----
 - name: Desplegar / Actualizar SonarQube en MicroK8s
   hosts: controller
   connection: local
