@@ -20,6 +20,10 @@
           - SONARQUBE_HOST is defined
         fail_msg: "Faltan variables SONARQUBE_NAMESPACE, SONARQUBE_IMAGE o SONARQUBE_HOST en vars/env.yml"
 
+    - name: Generar passcode de monitoring (si no está definido)
+      ansible.builtin.set_fact:
+        sonar_monitoring_passcode: "{{ SONARQUBE_MONITORING_PASSCODE | default(lookup('password', '/dev/null length=24 chars=ascii_letters,digits'), true) }}"
+
     - name: Crear namespace si no existe
       ansible.builtin.command: "microk8s kubectl create ns {{ SONARQUBE_NAMESPACE }}"
       register: create_ns
@@ -83,6 +87,7 @@
         --set ingress.ingressClassName=public
         --set ingress.hosts[0].name={{ SONARQUBE_HOST }}
         --set ingress.hosts[0].path=/
+        --set monitoringPasscode={{ sonar_monitoring_passcode }}
         --set resources.requests.memory={{ SONARQUBE_MEMORY_REQUEST | default('1Gi') }}
         --set resources.requests.cpu={{ SONARQUBE_CPU_REQUEST | default('250m') }}
         --set resources.limits.memory={{ SONARQUBE_MEMORY_LIMIT | default('2Gi') }}
