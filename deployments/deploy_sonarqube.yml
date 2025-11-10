@@ -101,14 +101,36 @@
       register: helm_deploy
       changed_when: helm_deploy.rc == 0
 
-    - name: Esperar a que los pods estén ready
-      ansible.builtin.shell: >-
-        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get pods -l app.kubernetes.io/name=sonarqube -o jsonpath='{.items[*].status.containerStatuses[*].ready}'
-      register: pod_ready
-      retries: 40
-      delay: 15
-      until: pod_ready.stdout is search('true')
+    - name: Detectar recurso principal (Deployment vs StatefulSet)
+      ansible.builtin.shell: microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get deploy sonarqube -o name || microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get deploy sonarqube-sonarqube -o name || microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get statefulset sonarqube -o name || microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get statefulset sonarqube-sonarqube -o name
+      register: main_resource
       changed_when: false
+
+    - name: Definir nombre del recurso principal
+      ansible.builtin.set_fact:
+        sonar_resource_name: "{{ (main_resource.stdout_lines | first | default('deployment/sonarqube')) }}"
+
+    - name: Esperar disponibilidad de pods SonarQube
+      ansible.builtin.shell: >-
+        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get pods -l release={{ release_name }} -o jsonpath='{.items[*].status.phase}'
+      register: pods_phase
+      retries: 60
+      delay: 10
+      until: pods_phase.stdout is search('Running')
+      changed_when: false
+
+    - name: Esperar readiness de contenedores SonarQube
+      ansible.builtin.shell: >-
+        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get pods -l release={{ release_name }} -o jsonpath='{.items[*].status.containerStatuses[*].ready}'
+      register: pods_ready
+      retries: 60
+      delay: 10
+      until: pods_ready.stdout is search('true')
+      changed_when: false
+
+    - name: Mostrar nombre del recurso principal
+      ansible.builtin.debug:
+        msg: "Recurso principal SonarQube: {{ sonar_resource_name }}"
 
     - name: Mostrar services SonarQube
       ansible.builtin.command: "microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get svc"
