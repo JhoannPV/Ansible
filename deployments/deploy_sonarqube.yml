@@ -34,13 +34,13 @@
       ansible.builtin.command: microk8s enable ingress
       become: true
       register: ingress_enable
-      changed_when: "'Nothing to do for ingress' not in ingress_enable.stdout"
+      changed_when: ingress_enable.stdout is not search('Nothing to do for ingress')
 
     - name: Habilitar addon helm3 en MicroK8s (idempotente)
       ansible.builtin.command: microk8s enable helm3
       become: true
       register: helm3_enable
-      changed_when: "'Nothing to do for helm3' not in helm3_enable.stdout"
+      changed_when: helm3_enable.stdout is not search('Nothing to do for helm3')
 
     - name: Asegurar directorio temporal
       ansible.builtin.file:
@@ -53,7 +53,7 @@
       ansible.builtin.command: microk8s helm3 repo add sonarqube {{ chart_repo }}
       register: helm_repo
       failed_when: false
-      changed_when: "'has been added' in (helm_repo.stdout | default(''))"
+      changed_when: (helm_repo.stdout | default('')) is search('has been added')
     - name: Calcular imagen repo y tag de SonarQube
       ansible.builtin.set_fact:
         sq_image_repo: "{{ (SONARQUBE_IMAGE | string).split(':')[0] }}"
@@ -75,9 +75,13 @@
       become: true
       when: persistence_flags is search('enabled=true')
       register: storage_enable
-      changed_when: "'Nothing to do for storage' not in (storage_enable.stdout | default(''))"
+      changed_when: (storage_enable.stdout | default('')) is not search('Nothing to do for storage')
 
-    - name: Desplegar / Actualizar SonarQube vía Helm
+    - name: Configurar flags de edición Community
+      ansible.builtin.set_fact:
+        edition_flags: "--set community.enabled=true"
+
+    - name: Desplegar / Actualizar SonarQube vía Helm (Community)
       ansible.builtin.command: >-
         microk8s helm3 upgrade --install {{ release_name }} {{ chart_name }}
         --namespace {{ SONARQUBE_NAMESPACE }}
@@ -92,6 +96,7 @@
         --set resources.requests.cpu={{ SONARQUBE_CPU_REQUEST | default('250m') }}
         --set resources.limits.memory={{ SONARQUBE_MEMORY_LIMIT | default('2Gi') }}
         --set resources.limits.cpu={{ SONARQUBE_CPU_LIMIT | default('1') }}
+        {{ edition_flags }}
         {{ persistence_flags }}
       register: helm_deploy
       changed_when: helm_deploy.rc == 0
