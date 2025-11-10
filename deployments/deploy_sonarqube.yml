@@ -1,3 +1,33 @@
+- name: Preparar nodos Kubernetes para SonarQube (sysctl)
+  hosts: all
+  become: true
+  tasks:
+    - name: Establecer vm.max_map_count requerido por Elasticsearch
+      ansible.builtin.sysctl:
+        name: vm.max_map_count
+        value: '262144'
+        state: present
+        sysctl_set: true
+        reload: true
+
+    - name: Aumentar límites de archivos
+      ansible.builtin.sysctl:
+        name: fs.file-max
+        value: '131072'
+        state: present
+        sysctl_set: true
+        reload: true
+
+    - name: Persistir límites nofile para servicios (opcional)
+      ansible.builtin.copy:
+        dest: /etc/security/limits.d/99-sonarqube.conf
+        content: |
+          * soft nofile 131072
+          * hard nofile 131072
+        owner: root
+        group: root
+        mode: '0644'
+
 ---
 - name: Desplegar / Actualizar SonarQube en MicroK8s
   hosts: controller
@@ -23,6 +53,12 @@
     - name: Generar passcode de monitoring (si no está definido)
       ansible.builtin.set_fact:
         sonar_monitoring_passcode: "{{ SONARQUBE_MONITORING_PASSCODE | default(lookup('password', '/dev/null length=24 chars=ascii_letters,digits'), true) }}"
+
+    - name: Definir credenciales de PostgreSQL para SonarQube (si no están definidas)
+      ansible.builtin.set_fact:
+        SQ_DB_USER: "{{ SONARQUBE_DB_USER | default('sonarqube') }}"
+        SQ_DB_NAME: "{{ SONARQUBE_DB_NAME | default('sonarqube') }}"
+        SQ_DB_PASSWORD: "{{ SONARQUBE_DB_PASSWORD | default(lookup('password', '/dev/null length=20 chars=ascii_letters,digits'), true) }}"
 
     - name: Crear namespace si no existe
       ansible.builtin.command: "microk8s kubectl create ns {{ SONARQUBE_NAMESPACE }}"
@@ -96,6 +132,11 @@
         --set resources.requests.cpu={{ SONARQUBE_CPU_REQUEST | default('250m') }}
         --set resources.limits.memory={{ SONARQUBE_MEMORY_LIMIT | default('2Gi') }}
         --set resources.limits.cpu={{ SONARQUBE_CPU_LIMIT | default('1') }}
+        --set community.enabled=true
+        --set postgresql.enabled=true
+        --set postgresql.auth.username={{ SQ_DB_USER }}
+        --set postgresql.auth.password={{ SQ_DB_PASSWORD }}
+        --set postgresql.auth.database={{ SQ_DB_NAME }}
         {{ edition_flags }}
         {{ persistence_flags }}
       register: helm_deploy
