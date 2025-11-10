@@ -30,13 +30,13 @@
       ansible.builtin.command: microk8s enable ingress
       become: true
       register: ingress_enable
-      changed_when: "Nothing to do for ingress" not in ingress_enable.stdout
+      changed_when: "'Nothing to do for ingress' not in ingress_enable.stdout"
 
     - name: Habilitar addon helm3 en MicroK8s (idempotente)
       ansible.builtin.command: microk8s enable helm3
       become: true
       register: helm3_enable
-      changed_when: "Nothing to do for helm3" not in helm3_enable.stdout
+      changed_when: "'Nothing to do for helm3' not in helm3_enable.stdout"
 
     - name: Asegurar directorio temporal
       ansible.builtin.file:
@@ -49,7 +49,7 @@
       ansible.builtin.command: microk8s helm3 repo add sonarqube {{ chart_repo }}
       register: helm_repo
       failed_when: false
-      changed_when: "has been added" in (helm_repo.stdout | default(''))
+      changed_when: "'has been added' in (helm_repo.stdout | default(''))"
     - name: Calcular imagen repo y tag de SonarQube
       ansible.builtin.set_fact:
         sq_image_repo: "{{ (SONARQUBE_IMAGE | string).split(':')[0] }}"
@@ -71,7 +71,7 @@
       become: true
       when: persistence_flags is search('enabled=true')
       register: storage_enable
-      changed_when: "Nothing to do for storage" not in (storage_enable.stdout | default(''))
+      changed_when: "'Nothing to do for storage' not in (storage_enable.stdout | default(''))"
 
     - name: Desplegar / Actualizar SonarQube vía Helm
       ansible.builtin.command: >-
