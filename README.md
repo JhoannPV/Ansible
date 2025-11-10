@@ -7,7 +7,8 @@ Este repositorio contiene una colección de playbooks de Ansible para automatiza
 - **🚀 Despliegue de aplicaciones**: Automatiza la instalación de Docker, clonado de repositorios y despliegue con Docker Compose
 - **🔧 Configuración de agentes Azure Pipelines**: Instala y configura agentes de build para Azure DevOps
 - **☸️ Instalación de MicroK8s**: Despliega clusters de Kubernetes ligeros para desarrollo
-- **🐳 Agentes Docker**: Levanta agentes de Azure Pipelines en contenedores Docker
+- **� SonarQube en MicroK8s**: Despliegue y análisis de calidad/cobertura integrable con Azure DevOps
+- **�🐳 Agentes Docker**: Levanta agentes de Azure Pipelines en contenedores Docker
 - **💻 Automatización de VMs**: Crea automáticamente máquinas virtuales con Debian 13.1.0, red puente y configuración desatendida
 - **⚙️ Configuración del sistema**: Gestiona usuarios, grupos, configuración de zona horaria y hostname
 
@@ -193,6 +194,83 @@ sudo ansible-playbook -i inventory.ini linux_hostname.yml
 # Configurar zona horaria
 sudo ansible-playbook -i inventory.ini timezone.yml
 ```
+
+### Despliegue de SonarQube en MicroK8s
+
+SonarQube se despliega vía Helm usando el playbook `deployments/deploy_sonarqube.yml`.
+
+1. Ajusta variables en `vars/env.yml`:
+```yaml
+SONARQUBE_NAMESPACE: "calendar-app"        # O un namespace dedicado
+SONARQUBE_IMAGE: "sonarqube:9.9-community" # Imagen LTS
+SONARQUBE_HOST: "sonar.local"             # Host para Ingress
+SONARQUBE_STORAGE_SIZE: "5Gi"             # Persistencia; vacía para usar emptyDir
+```
+
+2. Ejecuta el playbook:
+```bash
+sudo ansible-playbook deployments/deploy_sonarqube.yml
+```
+
+3. Añade en tu PC (Linux) la entrada en `/etc/hosts` para resolver el hostname (usa la IP del nodo controller o worker):
+```bash
+echo "192.168.1.24 sonar.local" | sudo tee -a /etc/hosts
+```
+
+4. Accede a: `http://sonar.local` (usuario: `admin`, password: `admin`). Cambia la contraseña al primer login.
+
+5. Genera un token personal: clic en tu avatar (arriba derecha) → My Account → Security → Generate Tokens. Copia el token para crear la Service Connection en Azure DevOps.
+
+### Integración Azure DevOps + SonarQube
+
+1. Instala la extensión oficial de SonarQube en tu organización de Azure DevOps (Marketplace).
+2. Crea una Service Connection:
+   - Project Settings → Service connections → New service connection → SonarQube.
+   - URL: `http://sonar.local` (o el dominio configurado).
+   - Token: el generado anteriormente.
+   - Name: `SonarQube-Service` (coincide con los pipelines).
+3. Guarda y verifica la conexión.
+
+Los pipelines de backend y frontend ya incluyen las tareas:
+```
+SonarQubePrepare@5 → NodeTool → npm ci/build → SonarQubeAnalyze@5 → SonarQubePublish@5 → Docker build & push → Ansible deploy
+```
+
+#### Ajustes opcionales de análisis
+Edita en cada pipeline los valores:
+```yaml
+sonarProjectKey: calendar-backend
+sonarProjectName: "Calendar Backend"
+```
+Puedes añadir cobertura generando `lcov.info` antes del paso `SonarQubeAnalyze` y agregando:
+```yaml
+sonar.javascript.lcov.reportPaths=coverage/lcov.info
+```
+
+### Troubleshooting SonarQube
+| Problema | Causa probable | Solución |
+|----------|----------------|----------|
+| Pods no inician (CrashLoop) | Recursos insuficientes | Incrementa `SONARQUBE_MEMORY_LIMIT` y CPU, verifica `free -m`. |
+| Calidad no publica | Falta Quality Gate o Service Connection inválida | Revisa Project Settings → Service connections y logs del job SonarQubePublish. |
+| Ingress no resuelve | HOST no en `/etc/hosts` o Ingress Controller no listo | Ejecuta `microk8s kubectl -n ingress get pods`, añade entrada en hosts. |
+| Error vm.max_map_count | Requisito Elasticsearch | Ejecuta en cada nodo: `sudo sysctl -w vm.max_map_count=262144` y añade en `/etc/sysctl.conf`. |
+
+Persistencia: Si deseas desactivar persistencia, deja `SONARQUBE_STORAGE_SIZE` vacío y se usará `emptyDir` (los datos se perderán tras reiniciar el pod).
+
+### Ejecutar análisis manual local (opcional)
+Si deseas probar un análisis fuera del pipeline:
+```bash
+# Instalar sonar-scanner (ejemplo rápido)
+sudo apt install unzip curl -y
+curl -sLo sonar.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-5.0.1.3006-linux.zip
+unzip sonar.zip -d $HOME/sonar
+export PATH="$HOME/sonar/sonar-scanner-5.0.1.3006-linux/bin:$PATH"
+
+# Ejecutar (en backend)
+cd DevOps-Proyect-Backend
+sonar-scanner -Dsonar.projectKey=calendar-backend -Dsonar.sources=src -Dsonar.host.url=http://sonar.local -Dsonar.login=<TOKEN>
+```
+
 
 ## 📂 Ubicación de Archivos
 
