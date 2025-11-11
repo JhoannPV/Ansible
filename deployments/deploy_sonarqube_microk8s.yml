@@ -305,10 +305,89 @@
           - "{{ sq_events.stdout | default('No events') }}"
       when: rollout_sq.rc != 0
 
+    # Remediación automática: crear usuario/DB en Postgres y reintentar rollout
+    - name: Obtener nombre del pod de Postgres
+      ansible.builtin.command:
+        argv:
+          - microk8s
+          - kubectl
+          - -n
+          - "{{ SONARQUBE_NAMESPACE }}"
+          - get
+          - pods
+          - -l
+          - app.kubernetes.io/name=postgresql,app.kubernetes.io/instance={{ SONARQUBE_HELM_RELEASE }}
+          - -o
+          - "jsonpath={.items[0].metadata.name}"
+      register: pg_pod_name
+      changed_when: false
+      failed_when: false
+      when: rollout_sq.rc != 0
+
+    - name: Obtener secreto de Postgres (json)
+      ansible.builtin.command: >-
+        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get secret {{ SONARQUBE_HELM_RELEASE }}-postgresql -o json
+      register: pg_secret_json
+      changed_when: false
+      failed_when: false
+      when: rollout_sq.rc != 0
+
+    - name: Decodificar contraseñas de BD desde el secreto
+      ansible.builtin.set_fact:
+        sq_app_password_b64: "{{ (pg_secret_json.stdout | default('{}')) | from_json | json_query('data."postgresql-password"') | default('') }}"
+        pg_admin_password_b64: "{{ (pg_secret_json.stdout | default('{}')) | from_json | json_query('data."postgres-password"') | default('') }}"
+      when: rollout_sq.rc != 0
+
+    - name: Establecer contraseñas decodificadas
+      ansible.builtin.set_fact:
+        sq_app_password: "{{ sq_app_password_b64 | b64decode if sq_app_password_b64 | length > 0 else '' }}"
+        pg_admin_password: "{{ pg_admin_password_b64 | b64decode if pg_admin_password_b64 | length > 0 else '' }}"
+      when: rollout_sq.rc != 0
+
+    - name: Crear/actualizar rol sonarUser y BD sonarDB en Postgres (si hay credenciales)
+      ansible.builtin.shell: |
+        set -euo pipefail
+        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} exec {{ pg_pod_name.stdout }} -- bash -lc '
+          export PGPASSWORD="{{ pg_admin_password }}";
+          psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE \"sonarUser\" LOGIN PASSWORD '{{ sq_app_password }}';" 2>/dev/null || true;
+          psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER ROLE \"sonarUser\" WITH LOGIN PASSWORD '{{ sq_app_password }}';";
+          psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"sonarDB\" OWNER \"sonarUser\";" 2>/dev/null || true;
+          psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "GRANT ALL PRIVILEGES ON DATABASE \"sonarDB\" TO \"sonarUser\";" 2>/dev/null || true;
+        '
+      args:
+        executable: /bin/bash
+      register: pg_fix
+      changed_when: true
+      failed_when: false
+      when: rollout_sq.rc != 0 and (pg_pod_name.stdout | default('')) | length > 0 and (pg_admin_password | default('')) | length > 0 and (sq_app_password | default('')) | length > 0
+
+    - name: Reiniciar pod de SonarQube para reintentar conexión a Postgres
+      ansible.builtin.command: >-
+        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} delete pod {{ first_pod_name.stdout }} --ignore-not-found
+      register: restart_sq_pod
+      changed_when: true
+      failed_when: false
+      when: rollout_sq.rc != 0 and (first_pod_name.stdout | default('')) | length > 0
+
+    - name: Esperar nuevamente a que el StatefulSet esté listo tras remediación (10 min)
+      ansible.builtin.command: >-
+        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} rollout status statefulset/{{ SONARQUBE_HELM_RELEASE }}-sonarqube --timeout=600s
+      register: rollout_sq_retry
+      failed_when: false
+      changed_when: false
+      when: rollout_sq.rc != 0
+
+    - name: Mostrar resultado post-remediación
+      ansible.builtin.debug:
+        msg:
+          - "Resultado del fix Postgres: rc={{ pg_fix.rc | default('n/a') }}"
+          - "Rollout retry rc={{ rollout_sq_retry.rc | default('n/a') }}"
+      when: rollout_sq.rc != 0
+
     - name: Fallar explícitamente si rollout no fue exitoso
       ansible.builtin.fail:
         msg: "SonarQube no llegó a Ready. Ver diagnóstico anterior y ajustar recursos/JVM/almacenamiento."
-      when: rollout_sq.rc != 0
+      when: rollout_sq.rc != 0 and (rollout_sq_retry.rc | default(1)) != 0
 
     - name: Mostrar Ingress creado
       ansible.builtin.command: "microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get ingress"
@@ -346,6 +425,11 @@
 
     - name: Eliminar PVC de SonarQube
       ansible.builtin.command: "microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} delete pvc -l app=sonarqube --ignore-not-found"
+      ignore_errors: true
+      tags: [cleanup]
+
+    - name: Eliminar PVC de Postgres (restablecer credenciales BD)
+      ansible.builtin.command: "microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} delete pvc -l app.kubernetes.io/name=postgresql,app.kubernetes.io/instance={{ SONARQUBE_HELM_RELEASE }} --ignore-not-found"
       ignore_errors: true
       tags: [cleanup]
 
