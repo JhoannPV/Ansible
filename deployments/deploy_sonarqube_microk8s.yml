@@ -94,9 +94,9 @@
               memory: "1Gi"
           # Ajustar Java opts para entornos pequeños
           sonarProperties:
-            - "sonar.ce.javaOpts=-Xms384m -Xmx384m -XX:+HeapDumpOnOutOfMemoryError"
-            - "sonar.web.javaOpts=-Xms512m -Xmx512m -XX:+HeapDumpOnOutOfMemoryError"
-            - "sonar.search.javaOpts=-Xms512m -Xmx512m -XX:+HeapDumpOnOutOfMemoryError"
+            sonar.ce.javaOpts: "-Xms384m -Xmx384m -XX:+HeapDumpOnOutOfMemoryError"
+            sonar.web.javaOpts: "-Xms512m -Xmx512m -XX:+HeapDumpOnOutOfMemoryError"
+            sonar.search.javaOpts: "-Xms512m -Xmx512m -XX:+HeapDumpOnOutOfMemoryError"
 
     - name: Instalar/Actualizar release SonarQube
       ansible.builtin.command: >-
