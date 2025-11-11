@@ -96,6 +96,27 @@
       ansible.builtin.command: "microk8s helm3 repo update"
       changed_when: false
 
+    - name: Validar existencia de chart local si se definió SONARQUBE_CHART_LOCAL_ARCHIVE
+      ansible.builtin.stat:
+        path: "{{ SONARQUBE_CHART_LOCAL_ARCHIVE }}"
+      register: local_chart_stat
+      when: SONARQUBE_CHART_LOCAL_ARCHIVE | length > 0
+
+    - name: Aviso si el archivo de chart local no existe
+      ansible.builtin.debug:
+        msg:
+          - "Archivo de chart local no encontrado: {{ SONARQUBE_CHART_LOCAL_ARCHIVE }}"
+          - "Se intentará usar el repositorio remoto con version {{ SONARQUBE_CHART_VERSION }}."
+      when: (SONARQUBE_CHART_LOCAL_ARCHIVE | length > 0) and (not local_chart_stat.stat.exists)
+
+    - name: Determinar origen del chart (local vs remoto)
+      ansible.builtin.set_fact:
+        chart_source: >-
+          {{
+            (SONARQUBE_CHART_LOCAL_ARCHIVE | length > 0) and (local_chart_stat.stat.exists | default(false))
+            | ternary(SONARQUBE_CHART_LOCAL_ARCHIVE, 'sonarqube/sonarqube')
+          }}
+
     - name: Diagnóstico DNS (github.com)
       ansible.builtin.command: getent hosts github.com
       register: dns_github
@@ -208,13 +229,13 @@
       changed_when: true
 
 
-    - name: Instalar/Actualizar release SonarQube (usa archivo local si está definido)
+    - name: Instalar/Actualizar release SonarQube (usa chart local si existe, de lo contrario remoto con versión)
       ansible.builtin.command: >-
         microk8s helm3 upgrade --install {{ SONARQUBE_HELM_RELEASE }}
-        {{ SONARQUBE_CHART_LOCAL_ARCHIVE | length > 0 and SONARQUBE_CHART_LOCAL_ARCHIVE or 'sonarqube/sonarqube' }}
+        {{ chart_source }}
         --namespace {{ SONARQUBE_NAMESPACE }}
         -f {{ helm_values_path }}
-        {{ SONARQUBE_CHART_LOCAL_ARCHIVE | length == 0 and ('--version ' + SONARQUBE_CHART_VERSION) or '' }}
+        {{ (chart_source == 'sonarqube/sonarqube') | ternary('--version ' + SONARQUBE_CHART_VERSION, '') }}
       register: helm_install
       changed_when: "'Release' in helm_install.stdout or helm_install.rc == 0"
       failed_when: helm_install.rc != 0
