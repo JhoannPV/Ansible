@@ -324,24 +324,44 @@
       failed_when: false
       when: rollout_sq.rc != 0
 
-    - name: Obtener secreto de Postgres (json)
-      ansible.builtin.command: >-
-        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get secret {{ SONARQUBE_HELM_RELEASE }}-postgresql -o json
-      register: pg_secret_json
+    - name: Obtener app password (b64) desde el secreto Postgres
+      ansible.builtin.command:
+        argv:
+          - microk8s
+          - kubectl
+          - -n
+          - "{{ SONARQUBE_NAMESPACE }}"
+          - get
+          - secret
+          - "{{ SONARQUBE_HELM_RELEASE }}-postgresql"
+          - -o
+          - "jsonpath={.data.postgresql-password}"
+      register: sq_app_password_b64_cmd
       changed_when: false
       failed_when: false
       when: rollout_sq.rc != 0
 
-    - name: Decodificar contraseñas de BD desde el secreto
-      ansible.builtin.set_fact:
-        sq_app_password_b64: "{{ (pg_secret_json.stdout | default('{}')) | from_json | json_query('data."postgresql-password"') | default('') }}"
-        pg_admin_password_b64: "{{ (pg_secret_json.stdout | default('{}')) | from_json | json_query('data."postgres-password"') | default('') }}"
+    - name: Obtener admin password (b64) desde el secreto Postgres
+      ansible.builtin.command:
+        argv:
+          - microk8s
+          - kubectl
+          - -n
+          - "{{ SONARQUBE_NAMESPACE }}"
+          - get
+          - secret
+          - "{{ SONARQUBE_HELM_RELEASE }}-postgresql"
+          - -o
+          - "jsonpath={.data.postgres-password}"
+      register: pg_admin_password_b64_cmd
+      changed_when: false
+      failed_when: false
       when: rollout_sq.rc != 0
 
     - name: Establecer contraseñas decodificadas
       ansible.builtin.set_fact:
-        sq_app_password: "{{ sq_app_password_b64 | b64decode if sq_app_password_b64 | length > 0 else '' }}"
-        pg_admin_password: "{{ pg_admin_password_b64 | b64decode if pg_admin_password_b64 | length > 0 else '' }}"
+        sq_app_password: "{{ (sq_app_password_b64_cmd.stdout | default('')) | b64decode if (sq_app_password_b64_cmd.stdout | default('')) | length > 0 else '' }}"
+        pg_admin_password: "{{ (pg_admin_password_b64_cmd.stdout | default('')) | b64decode if (pg_admin_password_b64_cmd.stdout | default('')) | length > 0 else '' }}"
       when: rollout_sq.rc != 0
 
     - name: Crear/actualizar rol sonarUser y BD sonarDB en Postgres (si hay credenciales)
