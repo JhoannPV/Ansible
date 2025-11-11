@@ -69,7 +69,6 @@
           image:
             repository: {{ SONARQUBE_IMAGE.split(':')[0] }}
             tag: {{ SONARQUBE_IMAGE.split(':')[1] | default('latest') }}
-          edition: community
           community:
             enabled: true
           monitoringPasscode: {{ monitoring_passcode }}
@@ -84,6 +83,7 @@
                 path: /
             annotations:
               kubernetes.io/ingress.class: public
+            ingressClassName: public
             tls: []
           resources:
             limits:
