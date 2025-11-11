@@ -122,6 +122,10 @@
             sonar.jdbc.username: "{{ SONARQUBE_DB_USER }}"
             sonar.jdbc.password: "{{ sq_db_password_effective }}"
             sonar.jdbc.url: "jdbc:postgresql://{{ SONARQUBE_HELM_RELEASE }}-postgresql:5432/{{ SONARQUBE_DB_NAME }}"
+            # Ajustar Java opts para entornos pequeños
+            sonar.ce.javaOpts: "-Xms384m -Xmx384m -XX:+HeapDumpOnOutOfMemoryError"
+            sonar.web.javaOpts: "-Xms512m -Xmx512m -XX:+HeapDumpOnOutOfMemoryError"
+            sonar.search.javaOpts: "-Xms512m -Xmx512m -XX:+HeapDumpOnOutOfMemoryError"
           # Seguridad del pod para acceso a volúmenes hostpath en MicroK8s
           securityContext:
             fsGroup: 1000
@@ -161,11 +165,6 @@
             requests:
               cpu: "500m"
               memory: "1Gi"
-          # Ajustar Java opts para entornos pequeños (se añaden a sonarProperties)
-          sonarProperties:
-            sonar.ce.javaOpts: "-Xms384m -Xmx384m -XX:+HeapDumpOnOutOfMemoryError"
-            sonar.web.javaOpts: "-Xms512m -Xmx512m -XX:+HeapDumpOnOutOfMemoryError"
-            sonar.search.javaOpts: "-Xms512m -Xmx512m -XX:+HeapDumpOnOutOfMemoryError"
     - name: Reset opcional de Postgres (eliminar STS y PVC) antes del Helm upgrade
       ansible.builtin.shell: |
         set -e
