@@ -1,0 +1,150 @@
+---
+- name: Desplegar SonarQube en Worker vía Docker
+  hosts: workers
+  become: true
+  vars_files:
+    - ../vars/env.yml
+
+  vars:
+    container_name: sonarqube
+
+  tasks:
+    - name: Validar variables requeridas
+      ansible.builtin.assert:
+        that:
+          - SONARQUBE_DOCKER_IMAGE is defined
+          - SONARQUBE_PORT is defined
+          - SONARQUBE_DATA_DIR is defined
+          - SONARQUBE_RUN_USER is defined
+        fail_msg: "Faltan variables SONARQUBE_DOCKER_IMAGE/PORT/DATA_DIR/RUN_USER en vars/env.yml"
+
+    - name: Instalar Docker si no está (Debian/Ubuntu)
+      ansible.builtin.package:
+        name: docker.io
+        state: present
+
+    - name: Asegurar servicio Docker iniciado
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Asegurar grupo docker
+      ansible.builtin.group:
+        name: docker
+        state: present
+
+    - name: Añadir usuario al grupo docker
+      ansible.builtin.user:
+        name: "{{ SONARQUBE_RUN_USER }}"
+        groups: docker
+        append: true
+      when: SONARQUBE_RUN_USER != 'root'
+
+    - name: Crear directorio de datos
+      ansible.builtin.file:
+        path: "{{ SONARQUBE_DATA_DIR }}"
+        state: directory
+        owner: "{{ SONARQUBE_RUN_USER }}"
+        group: "{{ SONARQUBE_RUN_USER }}"
+        mode: '0755'
+
+    - name: Crear directorio para logs
+      ansible.builtin.file:
+        path: "{{ SONARQUBE_DATA_DIR }}/logs"
+        state: directory
+        owner: "{{ SONARQUBE_RUN_USER }}"
+        group: "{{ SONARQUBE_RUN_USER }}"
+        mode: '0755'
+
+    - name: Crear archivo systemd de SonarQube (docker run)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/sonarqube.service
+        mode: '0644'
+        content: |
+          [Unit]
+          Description=SonarQube (Docker)
+          After=network.target docker.service
+          Requires=docker.service
+
+          [Service]
+          Type=simple
+          User={{ SONARQUBE_RUN_USER }}
+          Group={{ SONARQUBE_RUN_USER }}
+          Restart=always
+          RestartSec=10
+          ExecStart=/usr/bin/docker run --rm \
+            --name {{ container_name }} \
+            -p {{ SONARQUBE_PORT }}:9000 \
+            -v {{ SONARQUBE_DATA_DIR }}:/opt/sonarqube/data \
+            -v {{ SONARQUBE_DATA_DIR }}/logs:/opt/sonarqube/logs \
+            -e SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true \
+            {{ SONARQUBE_DOCKER_IMAGE }}
+          ExecStop=/usr/bin/docker stop {{ container_name }}
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Recargar systemd
+      ansible.builtin.command: systemctl daemon-reload
+
+    - name: Iniciar servicio SonarQube
+      ansible.builtin.systemd:
+        name: sonarqube.service
+        state: started
+        enabled: true
+
+    - name: Esperar a que SonarQube responda (hasta 3 min)
+      ansible.builtin.uri:
+        url: "http://{{ ansible_host }}:{{ SONARQUBE_PORT }}"
+        return_content: false
+        status_code: 200
+      register: sq_http
+      retries: 18
+      delay: 10
+      until: sq_http.status == 200
+      ignore_errors: true
+
+    - name: Mostrar estado inicial del contenedor
+      ansible.builtin.command: docker ps --filter name=sonarqube --format '{{"{{.Names}}\t{{.Status}}"}}'
+      register: docker_status
+      changed_when: false
+
+    - name: Imprimir instrucciones de acceso
+      ansible.builtin.debug:
+        msg:
+          - "Añade en tu PC /etc/hosts: <IP_WORKER>  {{ SONARQUBE_HOST | default('sonar.local') }}"
+          - "Accede a: http://{{ SONARQUBE_HOST | default(ansible_host) }}:{{ SONARQUBE_PORT }}"
+          - "Usuario/Password inicial: admin / admin"
+          - "Genera token: Administrador (avatar) -> My Account -> Security -> Generate Token"
+          - "Usa ese token en Azure DevOps Service Connection 'SonarQube-Service'"
+
+---
+- name: Limpieza opcional de SonarQube Docker (run con --tags cleanup)
+  hosts: workers
+  become: true
+  vars_files:
+    - ../vars/env.yml
+  tasks:
+    - name: Parar servicio
+      ansible.builtin.systemd:
+        name: sonarqube.service
+        state: stopped
+      tags: [cleanup]
+
+    - name: Eliminar servicio systemd
+      ansible.builtin.file:
+        path: /etc/systemd/system/sonarqube.service
+        state: absent
+      tags: [cleanup]
+
+    - name: Eliminar datos (opcional)
+      ansible.builtin.file:
+        path: "{{ SONARQUBE_DATA_DIR }}"
+        state: absent
+      tags: [cleanup]
+
+    - name: Eliminar imagen (opcional)
+      ansible.builtin.command: docker rmi {{ SONARQUBE_DOCKER_IMAGE }}
+      ignore_errors: true
+      tags: [cleanup]
