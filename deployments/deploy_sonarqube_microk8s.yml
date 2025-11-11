@@ -1,0 +1,175 @@
+---
+- name: Desplegar SonarQube Community en MicroK8s via Helm
+  hosts: controller
+  connection: local
+  become: true
+  vars_files:
+    - ../vars/env.yml
+
+  vars:
+    SONARQUBE_NAMESPACE: "{{ K8S_NAMESPACE | default('calendar-app') }}"
+    SONARQUBE_IMAGE: "sonarqube:9.9-community"
+    SONARQUBE_HELM_RELEASE: "sonarqube"
+    SONARQUBE_STORAGE_SIZE: "8Gi"
+    SONARQUBE_HOST: "{{ SONARQUBE_HOST | default('sonar.local') }}"
+    helm_values_path: "/tmp/sonarqube-values.yaml"
+    monitoring_passcode_length: 16
+
+  tasks:
+    - name: Validar variables requeridas
+      ansible.builtin.assert:
+        that:
+          - SONARQUBE_NAMESPACE is defined
+          - SONARQUBE_HOST is defined
+        fail_msg: "Faltan SONARQUBE_NAMESPACE o SONARQUBE_HOST (añade SONARQUBE_HOST en vars/env.yml)."
+
+    - name: Generar monitoringPasscode aleatorio
+      ansible.builtin.set_fact:
+        monitoring_passcode: "{{ lookup('ansible.builtin.password', '/dev/null chars=ascii_letters,digits length=' + monitoring_passcode_length|string) }}"
+
+    - name: Habilitar addons necesarios (helm3, storage, ingress)
+      ansible.builtin.command: "microk8s enable helm3 storage ingress"
+      register: addons_enable
+      changed_when: "'enabled' in addons_enable.stdout or addons_enable.rc == 0"
+      failed_when: false
+
+    - name: Asegurar vm.max_map_count en el host (requisito Elasticsearch)
+      ansible.builtin.lineinfile:
+        path: /etc/sysctl.conf
+        regexp: '^vm.max_map_count='
+        line: 'vm.max_map_count=262144'
+        state: present
+      notify: Reload sysctl
+
+    - name: Aplicar vm.max_map_count inmediato
+      ansible.builtin.command: sysctl -w vm.max_map_count=262144
+      changed_when: false
+
+    - name: Crear namespace SonarQube si no existe
+      ansible.builtin.command: "microk8s kubectl create ns {{ SONARQUBE_NAMESPACE }}"
+      register: ns_create
+      changed_when: ns_create.rc == 0
+      failed_when: false
+
+    - name: Añadir repo Helm SonarQube
+      ansible.builtin.command: "microk8s helm3 repo add sonarqube https://SonarSource.github.io/helm-chart-sonarqube"
+      register: helm_repo_add
+      changed_when: helm_repo_add.rc == 0
+      failed_when: false
+
+    - name: Actualizar repos Helm
+      ansible.builtin.command: "microk8s helm3 repo update"
+      changed_when: false
+
+    - name: Renderizar archivo de valores Helm
+      ansible.builtin.copy:
+        dest: "{{ helm_values_path }}"
+        mode: '0644'
+        content: |
+          image:
+            repository: {{ SONARQUBE_IMAGE.split(':')[0] }}
+            tag: {{ SONARQUBE_IMAGE.split(':')[1] | default('latest') }}
+          edition: community
+          community:
+            enabled: true
+          monitoringPasscode: {{ monitoring_passcode }}
+          persistence:
+            enabled: true
+            storageClass: microk8s-hostpath
+            size: {{ SONARQUBE_STORAGE_SIZE }}
+          ingress:
+            enabled: true
+            hosts:
+              - name: {{ SONARQUBE_HOST }}
+                path: /
+            annotations:
+              kubernetes.io/ingress.class: public
+            tls: []
+          resources:
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+          # Ajustar Java opts para entornos pequeños
+          sonarProperties:
+            - "sonar.ce.javaOpts=-Xms384m -Xmx384m -XX:+HeapDumpOnOutOfMemoryError"
+            - "sonar.web.javaOpts=-Xms512m -Xmx512m -XX:+HeapDumpOnOutOfMemoryError"
+            - "sonar.search.javaOpts=-Xms512m -Xmx512m -XX:+HeapDumpOnOutOfMemoryError"
+
+    - name: Instalar/Actualizar release SonarQube
+      ansible.builtin.command: >-
+        microk8s helm3 upgrade --install {{ SONARQUBE_HELM_RELEASE }} sonarqube/sonarqube
+        --namespace {{ SONARQUBE_NAMESPACE }}
+        -f {{ helm_values_path }}
+      register: helm_install
+      changed_when: "'Release' in helm_install.stdout or helm_install.rc == 0"
+      failed_when: helm_install.rc != 0
+
+    - name: Esperar a que el StatefulSet de SonarQube esté listo
+      ansible.builtin.command: >-
+        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} rollout status statefulset/{{ SONARQUBE_HELM_RELEASE }}-sonarqube --timeout=900s
+      register: rollout_sq
+      retries: 5
+      delay: 30
+      until: rollout_sq.rc == 0
+
+    - name: Mostrar pods SonarQube (debug)
+      ansible.builtin.command: "microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get pods -l app=sonarqube -o wide"
+      register: sq_pods
+      changed_when: false
+
+    - name: Mostrar eventos de SonarQube (debug)
+      ansible.builtin.command: "microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get events --sort-by=.lastTimestamp | grep -i sonar || true"
+      register: sq_events
+      changed_when: false
+
+    - name: Mostrar Ingress creado
+      ansible.builtin.command: "microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get ingress"
+      register: sq_ing
+      changed_when: false
+
+    - name: Instrucciones de acceso
+      ansible.builtin.debug:
+        msg:
+          - "Añade en tu PC /etc/hosts: <IP_DEL_NODO>  {{ SONARQUBE_HOST }}"
+          - "Accede a: http://{{ SONARQUBE_HOST }}"
+          - "Credenciales iniciales: admin / admin"
+          - "Genera token: Admin -> My Account -> Security -> Generate Token"
+          - "Usa ese token en Azure DevOps Service Connection 'SonarQube-Service'"
+
+  handlers:
+    - name: Reload sysctl
+      ansible.builtin.command: sysctl -p
+      changed_when: false
+
+- name: Limpieza opcional SonarQube (Helm + PVC)
+  hosts: controller
+  connection: local
+  become: true
+  vars_files:
+    - ../vars/env.yml
+  vars:
+    SONARQUBE_NAMESPACE: "{{ K8S_NAMESPACE | default('calendar-app') }}"
+    SONARQUBE_HELM_RELEASE: "sonarqube"
+  tasks:
+    - name: Desinstalar release Helm SonarQube
+      ansible.builtin.command: "microk8s helm3 uninstall {{ SONARQUBE_HELM_RELEASE }} -n {{ SONARQUBE_NAMESPACE }}"
+      ignore_errors: true
+      tags: [cleanup]
+
+    - name: Eliminar PVC de SonarQube
+      ansible.builtin.command: "microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} delete pvc -l app=sonarqube --ignore-not-found"
+      ignore_errors: true
+      tags: [cleanup]
+
+    - name: Eliminar Ingress SonarQube
+      ansible.builtin.command: "microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} delete ingress -l app=sonarqube --ignore-not-found"
+      ignore_errors: true
+      tags: [cleanup]
+
+    - name: Eliminar eventos antiguos
+      ansible.builtin.command: "microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} delete events --all"
+      ignore_errors: true
+      tags: [cleanup]
