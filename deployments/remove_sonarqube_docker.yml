@@ -62,8 +62,6 @@
       ansible.builtin.file:
         path: "{{ SONARQUBE_DATA_DIR }}"
         state: absent
-
----
 - name: Remover Ingress y recursos K8s (Service/Endpoints) usados para SonarQube Docker
   hosts: controller
   connection: local
