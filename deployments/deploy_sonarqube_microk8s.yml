@@ -1,4 +1,20 @@
 ---
+- name: Preparar nodos (workers) para SonarQube
+  hosts: workers
+  become: true
+  tasks:
+    - name: Asegurar vm.max_map_count=262144 (persistente)
+      ansible.builtin.lineinfile:
+        path: /etc/sysctl.conf
+        regexp: '^vm.max_map_count='
+        line: 'vm.max_map_count=262144'
+        state: present
+
+    - name: Aplicar vm.max_map_count inmediatamente
+      ansible.builtin.command: sysctl -w vm.max_map_count=262144
+      changed_when: false
+
+---
 - name: Desplegar SonarQube Community en MicroK8s via Helm
   hosts: controller
   connection: local
@@ -85,6 +101,30 @@
               kubernetes.io/ingress.class: public
             ingressClassName: public
             tls: []
+          startupProbe:
+            enabled: true
+            httpGet:
+              path: /api/system/status
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 90
+          readinessProbe:
+            enabled: true
+            exec:
+              command:
+                - sh
+                - -c
+                - |
+                  #!/bin/bash
+                  if wget --no-proxy -qO- http://localhost:9000/api/system/status | grep -q -e '"status":"UP"' -e '"status":"DB_MIGRATION_NEEDED"' -e '"status":"DB_MIGRATION_RUNNING"'; then
+                    exit 0
+                  fi
+                  exit 1
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 10
           resources:
             limits:
               cpu: "1"
