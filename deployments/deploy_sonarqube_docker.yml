@@ -119,8 +119,13 @@
           - "Genera token: Administrador (avatar) -> My Account -> Security -> Generate Token"
           - "Usa ese token en Azure DevOps Service Connection 'SonarQube-Service'"
 
-  # Para ejecutar limpieza usar: ansible-playbook deployments/deploy_sonarqube_docker.yml --tags cleanup
-  # Se mantiene en el mismo documento sin segundo separador '---' para evitar error YAML.
+  # (Las tareas de despliegue del play anterior van arriba; limpieza se mueve a un segundo play.)
+
+- name: Limpieza opcional de SonarQube Docker
+  hosts: workers
+  become: true
+  vars_files:
+    - ../vars/env.yml
   tasks:
     - name: Parar servicio
       ansible.builtin.systemd:
