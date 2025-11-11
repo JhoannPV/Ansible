@@ -107,23 +107,61 @@
       changed_when: "'Release' in helm_install.stdout or helm_install.rc == 0"
       failed_when: helm_install.rc != 0
 
-    - name: Esperar a que el StatefulSet de SonarQube esté listo
+    - name: Esperar a que el StatefulSet de SonarQube esté listo (hasta 15 min)
       ansible.builtin.command: >-
         microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} rollout status statefulset/{{ SONARQUBE_HELM_RELEASE }}-sonarqube --timeout=900s
       register: rollout_sq
-      retries: 5
-      delay: 30
-      until: rollout_sq.rc == 0
+      retries: 1
+      delay: 5
+      failed_when: false
+      changed_when: false
 
-    - name: Mostrar pods SonarQube (debug)
+    - name: Obtener describe del StatefulSet (debug)
+      ansible.builtin.command: >-
+        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} describe statefulset {{ SONARQUBE_HELM_RELEASE }}-sonarqube
+      register: sts_describe
+      changed_when: false
+      when: rollout_sq.rc != 0
+
+    - name: Listar pods SonarQube (debug)
       ansible.builtin.command: "microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get pods -l app=sonarqube -o wide"
-      register: sq_pods
+      register: sq_pods_list
       changed_when: false
+      when: rollout_sq.rc != 0
 
-    - name: Mostrar eventos de SonarQube (debug)
-      ansible.builtin.command: "microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get events --sort-by=.lastTimestamp | grep -i sonar || true"
-      register: sq_events
+    - name: Describe del pod SonarQube (debug)
+      ansible.builtin.command: >-
+        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} describe pod $(microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get pods -l app=sonarqube -o jsonpath='{.items[0].metadata.name}')
+      register: pod_describe
       changed_when: false
+      when: rollout_sq.rc != 0
+
+    - name: Logs contenedor principal (tail 200)
+      ansible.builtin.command: >-
+        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} logs -l app=sonarqube -c sonarqube --tail=200
+      register: pod_logs
+      changed_when: false
+      failed_when: false
+      when: rollout_sq.rc != 0
+
+    - name: Mostrar diagnóstico de fallo rollout
+      ansible.builtin.debug:
+        msg:
+          - "Rollout SonarQube falló. Revisa la información de diagnóstico."
+          - "StatefulSet describe:" 
+          - "{{ sts_describe.stdout | default('No STS describe') }}"
+          - "Pods list:" 
+          - "{{ sq_pods_list.stdout | default('No pods list') }}"
+          - "Pod describe:" 
+          - "{{ pod_describe.stdout | default('No pod describe') }}"
+          - "Logs (tail 200):" 
+          - "{{ pod_logs.stdout | default('No logs') }}"
+      when: rollout_sq.rc != 0
+
+    - name: Fallar explícitamente si rollout no fue exitoso
+      ansible.builtin.fail:
+        msg: "SonarQube no llegó a Ready. Ver diagnóstico anterior y ajustar recursos/JVM/almacenamiento."
+      when: rollout_sq.rc != 0
 
     - name: Mostrar Ingress creado
       ansible.builtin.command: "microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get ingress"
