@@ -19,7 +19,7 @@
         fail_msg: "Faltan variables SONARQUBE_DOCKER_IMAGE/PORT/DATA_DIR/RUN_USER en vars/env.yml"
 
     - name: Asegurar vm.max_map_count requerido por Elasticsearch
-      ansible.builtin.block:
+      block:
         - name: Configurar vm.max_map_count de forma persistente
           ansible.builtin.lineinfile:
             path: /etc/sysctl.conf
