@@ -103,6 +103,11 @@
           community:
             enabled: true
           monitoringPasscode: {{ monitoring_passcode }}
+          # Fuerza a usar los valores JDBC provistos aquí (evita lecturas de secrets inconsistentes)
+          jdbcOverwrite: true
+          jdbcUrl: "jdbc:postgresql://{{ SONARQUBE_HELM_RELEASE }}-postgresql:5432/{{ SONARQUBE_DB_NAME }}"
+          jdbcUsername: "{{ SONARQUBE_DB_USER }}"
+          jdbcPassword: "{{ sq_db_password_effective }}"
           persistence:
             enabled: true
             storageClass: microk8s-hostpath
@@ -165,11 +170,18 @@
             requests:
               cpu: "500m"
               memory: "1Gi"
-    - name: Reset opcional de Postgres (eliminar STS y PVC) antes del Helm upgrade
+    - name: Reset opcional de Postgres (eliminar STS, Secret y PVC) antes del Helm upgrade
       ansible.builtin.shell: |
         set -e
         microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} delete statefulset {{ SONARQUBE_HELM_RELEASE }}-postgresql --ignore-not-found
+        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} delete secret {{ SONARQUBE_HELM_RELEASE }}-postgresql --ignore-not-found
         microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} delete pvc -l app.kubernetes.io/name=postgresql,app.kubernetes.io/instance={{ SONARQUBE_HELM_RELEASE }} --ignore-not-found
+        # Esperar a que ya no existan PVCs de Postgres etiquetados con el release
+        for i in $(seq 1 30); do
+          REMAIN=$(microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get pvc -l app.kubernetes.io/name=postgresql,app.kubernetes.io/instance={{ SONARQUBE_HELM_RELEASE }} --no-headers 2>/dev/null | wc -l || true)
+          [ "$REMAIN" = "0" ] && break
+          sleep 2
+        done
       args:
         executable: /bin/bash
       when: SONARQUBE_FORCE_PG_RESET | bool
@@ -320,6 +332,30 @@
       failed_when: false
       when: rollout_sq.rc != 0
 
+    - name: ConfigMap JDBC (debug)
+      ansible.builtin.command: >-
+        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get configmap {{ SONARQUBE_HELM_RELEASE }}-sonarqube-jdbc-config -o yaml
+      register: cm_jdbc_cfg
+      changed_when: false
+      failed_when: false
+      when: rollout_sq.rc != 0
+
+    - name: ConfigMap principal SonarQube (debug)
+      ansible.builtin.command: >-
+        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get configmap {{ SONARQUBE_HELM_RELEASE }}-sonarqube-config -o yaml
+      register: cm_main_cfg
+      changed_when: false
+      failed_when: false
+      when: rollout_sq.rc != 0
+
+    - name: Secret Postgres (solo metadatos)
+      ansible.builtin.command: >-
+        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} describe secret {{ SONARQUBE_HELM_RELEASE }}-postgresql
+      register: secret_pg_desc
+      changed_when: false
+      failed_when: false
+      when: rollout_sq.rc != 0
+
     - name: Mostrar diagnóstico de fallo rollout
       ansible.builtin.debug:
         msg:
@@ -344,6 +380,12 @@
           - "{{ pg_logs.stdout | default('No pg logs') }}"
           - "Eventos:" 
           - "{{ sq_events.stdout | default('No events') }}"
+      - "ConfigMap JDBC:" 
+      - "{{ cm_jdbc_cfg.stdout | default('No cm jdbc') }}"
+      - "ConfigMap principal:" 
+      - "{{ cm_main_cfg.stdout | default('No cm main') }}"
+      - "Secret Postgres (describe):" 
+      - "{{ secret_pg_desc.stdout | default('No secret desc') }}"
       when: rollout_sq.rc != 0
 
     # Remediación automática: crear usuario/DB en Postgres y reintentar rollout
