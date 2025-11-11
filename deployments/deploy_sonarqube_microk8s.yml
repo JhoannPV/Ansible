@@ -129,17 +129,52 @@
       changed_when: false
       when: rollout_sq.rc != 0
 
+    - name: Obtener nombre del primer pod SonarQube (si existe)
+      ansible.builtin.command:
+        argv:
+          - microk8s
+          - kubectl
+          - -n
+          - "{{ SONARQUBE_NAMESPACE }}"
+          - get
+          - pods
+          - -l
+          - app=sonarqube
+          - -o
+          - "jsonpath={.items[0].metadata.name}"
+      register: first_pod_name
+      changed_when: false
+      failed_when: false
+      when: rollout_sq.rc != 0
+
     - name: Describe del pod SonarQube (debug)
-      ansible.builtin.command: >-
-        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} describe pod $(microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get pods -l app=sonarqube -o jsonpath='{.items[0].metadata.name}')
+      ansible.builtin.command:
+        argv:
+          - microk8s
+          - kubectl
+          - -n
+          - "{{ SONARQUBE_NAMESPACE }}"
+          - describe
+          - pod
+          - "{{ first_pod_name.stdout | default('') }}"
       register: pod_describe
       changed_when: false
-      when: rollout_sq.rc != 0
+      failed_when: false
+      when: rollout_sq.rc != 0 and (first_pod_name.stdout is defined and first_pod_name.stdout | length > 0)
 
     - name: Logs contenedor principal (tail 200)
       ansible.builtin.command: >-
         microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} logs -l app=sonarqube -c sonarqube --tail=200
       register: pod_logs
+      changed_when: false
+      failed_when: false
+      when: rollout_sq.rc != 0
+
+    - name: Eventos recientes relacionados (debug)
+      ansible.builtin.shell: "microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get events --sort-by=.lastTimestamp | grep -i -E 'sonar|elastic|java|oom' || true"
+      args:
+        executable: /bin/bash
+      register: sq_events
       changed_when: false
       failed_when: false
       when: rollout_sq.rc != 0
@@ -156,6 +191,8 @@
           - "{{ pod_describe.stdout | default('No pod describe') }}"
           - "Logs (tail 200):" 
           - "{{ pod_logs.stdout | default('No logs') }}"
+      - "Eventos:" 
+      - "{{ sq_events.stdout | default('No events') }}"
       when: rollout_sq.rc != 0
 
     - name: Fallar explícitamente si rollout no fue exitoso
