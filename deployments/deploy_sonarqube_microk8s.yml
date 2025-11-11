@@ -358,28 +358,68 @@
       failed_when: false
       when: rollout_sq.rc != 0
 
+    - name: Obtener admin password alternativa (b64) desde el secreto Postgres (postgresql-postgres-password)
+      ansible.builtin.command:
+        argv:
+          - microk8s
+          - kubectl
+          - -n
+          - "{{ SONARQUBE_NAMESPACE }}"
+          - get
+          - secret
+          - "{{ SONARQUBE_HELM_RELEASE }}-postgresql"
+          - -o
+          - "jsonpath={.data.postgresql-postgres-password}"
+      register: pg_admin_password_alt_b64_cmd
+      changed_when: false
+      failed_when: false
+      when: rollout_sq.rc != 0
+
     - name: Establecer contraseñas decodificadas
       ansible.builtin.set_fact:
         sq_app_password: "{{ (sq_app_password_b64_cmd.stdout | default('')) | b64decode if (sq_app_password_b64_cmd.stdout | default('')) | length > 0 else '' }}"
-        pg_admin_password: "{{ (pg_admin_password_b64_cmd.stdout | default('')) | b64decode if (pg_admin_password_b64_cmd.stdout | default('')) | length > 0 else '' }}"
+        pg_admin_password: >-
+          {{
+            ((pg_admin_password_b64_cmd.stdout | default('')) | length > 0)
+            | ternary((pg_admin_password_b64_cmd.stdout | b64decode), (
+              ((pg_admin_password_alt_b64_cmd.stdout | default('')) | length > 0)
+              | ternary((pg_admin_password_alt_b64_cmd.stdout | b64decode), '')
+            ))
+          }}
       when: rollout_sq.rc != 0
 
-    - name: Crear/actualizar rol sonarUser y BD sonarDB en Postgres (si hay credenciales)
+    - name: Crear/actualizar rol sonarUser y BD sonarDB en Postgres (con/sin password admin)
       ansible.builtin.shell: |
         set -euo pipefail
-        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} exec {{ pg_pod_name.stdout }} -- bash -lc '
-          export PGPASSWORD="{{ pg_admin_password }}";
-          psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE \"sonarUser\" LOGIN PASSWORD '{{ sq_app_password }}';" 2>/dev/null || true;
-          psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER ROLE \"sonarUser\" WITH LOGIN PASSWORD '{{ sq_app_password }}';";
-          psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"sonarDB\" OWNER \"sonarUser\";" 2>/dev/null || true;
-          psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "GRANT ALL PRIVILEGES ON DATABASE \"sonarDB\" TO \"sonarUser\";" 2>/dev/null || true;
-        '
+        ADMIN_PWD='{{ pg_admin_password }}'
+        APP_PWD='{{ sq_app_password }}'
+        if [ -z "$APP_PWD" ]; then
+          echo "APP_PWD vacío; no se puede remediar" >&2
+          exit 0
+        fi
+        if [ -n "$ADMIN_PWD" ]; then
+          microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} exec {{ pg_pod_name.stdout }} -- bash -lc '
+            export PGPASSWORD="'"$ADMIN_PWD"'";
+            psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE \"sonarUser\" LOGIN PASSWORD '''"$APP_PWD"''' ;" 2>/dev/null || true;
+            psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER ROLE \"sonarUser\" WITH LOGIN PASSWORD '''"$APP_PWD"''' ;";
+            psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"sonarDB\" OWNER \"sonarUser\";" 2>/dev/null || true;
+            psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "GRANT ALL PRIVILEGES ON DATABASE \"sonarDB\" TO \"sonarUser\";" 2>/dev/null || true;
+          '
+        else
+          # Intento sin password (socket local puede estar en trust)
+          microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} exec {{ pg_pod_name.stdout }} -- bash -lc '
+            psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE \"sonarUser\" LOGIN PASSWORD '''"$APP_PWD"''' ;" 2>/dev/null || true;
+            psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "ALTER ROLE \"sonarUser\" WITH LOGIN PASSWORD '''"$APP_PWD"''' ;" 2>/dev/null || true;
+            psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"sonarDB\" OWNER \"sonarUser\";" 2>/dev/null || true;
+            psql -U postgres -d postgres -v ON_ERROR_STOP=1 -c "GRANT ALL PRIVILEGES ON DATABASE \"sonarDB\" TO \"sonarUser\";" 2>/dev/null || true;
+          ' || true
+        fi
       args:
         executable: /bin/bash
       register: pg_fix
       changed_when: true
       failed_when: false
-      when: rollout_sq.rc != 0 and (pg_pod_name.stdout | default('')) | length > 0 and (pg_admin_password | default('')) | length > 0 and (sq_app_password | default('')) | length > 0
+      when: rollout_sq.rc != 0 and (pg_pod_name.stdout | default('')) | length > 0
 
     - name: Reiniciar pod de SonarQube para reintentar conexión a Postgres
       ansible.builtin.command: >-
