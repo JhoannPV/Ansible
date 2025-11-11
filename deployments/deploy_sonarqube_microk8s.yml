@@ -116,10 +116,11 @@
           # Configuración de Postgres subchart (Bitnami)
           postgresql:
             enabled: true
-            auth:
-              username: {{ SONARQUBE_DB_USER }}
-              database: {{ SONARQUBE_DB_NAME }}
-              password: {{ sq_db_password_effective }}
+            # IMPORTANTE: El chart Bitnami postgresql 10.15.0 usa claves planas
+            # postgresqlUsername/postgresqlPassword/postgresqlDatabase en lugar de 'auth.*'
+            postgresqlUsername: {{ SONARQUBE_DB_USER }}
+            postgresqlPassword: {{ sq_db_password_effective }}
+            postgresqlDatabase: {{ SONARQUBE_DB_NAME }}
             primary:
               persistence:
                 enabled: true
