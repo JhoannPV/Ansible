@@ -63,6 +63,12 @@
 
     - name: Localizar binario de docker
       block:
+        - name: Buscar docker en PATH común
+          ansible.builtin.shell: "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin command -v docker"
+          register: docker_cmd
+          changed_when: false
+          failed_when: false
+
         - name: Revisar /usr/bin/docker
           ansible.builtin.stat:
             path: /usr/bin/docker
@@ -76,8 +82,19 @@
         - name: Definir variable docker_bin
           ansible.builtin.set_fact:
             docker_bin: >-
-              {{ '/usr/bin/docker' if docker_usrbin.stat.exists else (
-                 '/snap/bin/docker' if docker_snapbin.stat.exists else 'docker') }}
+              {{ (docker_cmd.stdout | trim) if (docker_cmd.rc == 0 and (docker_cmd.stdout | trim) != '') else (
+                 '/usr/bin/docker' if docker_usrbin.stat.exists else (
+                 '/snap/bin/docker' if docker_snapbin.stat.exists else 'docker')) }}
+
+        - name: Verificar que el binario de docker existe
+          ansible.builtin.assert:
+            that:
+              - docker_cmd.rc == 0 or docker_usrbin.stat.exists or docker_snapbin.stat.exists
+            fail_msg: "No se encontró la CLI de Docker. Verifica la instalación de docker.io o docker-ce en el worker."
+
+        - name: Mostrar docker_bin detectado
+          ansible.builtin.debug:
+            var: docker_bin
 
     - name: Asegurar grupo docker
       ansible.builtin.group:
@@ -107,6 +124,14 @@
         group: "{{ SONARQUBE_RUN_USER }}"
         mode: '0755'
 
+    - name: Crear directorio para extensiones
+      ansible.builtin.file:
+        path: "{{ SONARQUBE_DATA_DIR }}/extensions"
+        state: directory
+        owner: "{{ SONARQUBE_RUN_USER }}"
+        group: "{{ SONARQUBE_RUN_USER }}"
+        mode: '0755'
+
     - name: Crear archivo systemd de SonarQube (docker run)
       ansible.builtin.copy:
         dest: /etc/systemd/system/sonarqube.service
@@ -125,15 +150,20 @@
           LimitNOFILE=65536
           Restart=always
           RestartSec=10
+          TimeoutStartSec=300
           # No usar --rm para poder inspeccionar el contenedor si falla
           ExecStartPre=/bin/sh -c '{{ docker_bin }} rm -f {{ container_name }} || true'
+          ExecStartPre={{ docker_bin }} pull {{ SONARQUBE_DOCKER_IMAGE }}
           ExecStart={{ docker_bin }} run \
             --name {{ container_name }} \
             -p {{ SONARQUBE_PORT }}:9000 \
             -v {{ SONARQUBE_DATA_DIR }}:/opt/sonarqube/data \
             -v {{ SONARQUBE_DATA_DIR }}/logs:/opt/sonarqube/logs \
+            -v {{ SONARQUBE_DATA_DIR }}/extensions:/opt/sonarqube/extensions \
             --ulimit nofile=65536:65536 \
             -e SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true \
+            -e SONAR_WEB_JAVAOPTS="-Xms512m -Xmx512m -XX:+HeapDumpOnOutOfMemoryError" \
+            -e SONAR_CE_JAVAOPTS="-Xms384m -Xmx384m -XX:+HeapDumpOnOutOfMemoryError" \
             {{ SONARQUBE_DOCKER_IMAGE }}
           ExecStop={{ docker_bin }} stop {{ container_name }}
 
@@ -198,6 +228,20 @@
         var: sq_logs.stdout_lines
       when: sq_logs is defined
 
+    - name: Mostrar contenedores (si hubo fallo)
+      ansible.builtin.command: "{{ docker_bin }} ps -a"
+      register: docker_ps_all
+      changed_when: false
+      when: sq_http.status is not defined or sq_http.status != 200
+      ignore_errors: true
+
+    - name: Inspeccionar contenedor (si existe y hubo fallo)
+      ansible.builtin.command: "{{ docker_bin }} inspect {{ container_name }}"
+      register: docker_inspect
+      changed_when: false
+      when: (sq_http.status is not defined or sq_http.status != 200) and (docker_ps_all.stdout is defined and (container_name in docker_ps_all.stdout))
+      ignore_errors: true
+
     - name: Imprimir instrucciones de acceso
       ansible.builtin.debug:
         msg:
@@ -239,6 +283,6 @@
       tags: [cleanup]
 
     - name: Eliminar imagen (opcional)
-      ansible.builtin.command: docker rmi {{ SONARQUBE_DOCKER_IMAGE }}
+      ansible.builtin.command: "{{ docker_bin | default('docker') }} rmi {{ SONARQUBE_DOCKER_IMAGE }}"
       ignore_errors: true
       tags: [cleanup]
