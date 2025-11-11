@@ -18,10 +18,28 @@
           - SONARQUBE_RUN_USER is defined
         fail_msg: "Faltan variables SONARQUBE_DOCKER_IMAGE/PORT/DATA_DIR/RUN_USER en vars/env.yml"
 
-    - name: Instalar Docker si no está (Debian/Ubuntu)
+    - name: Comprobar si docker ya está instalado
+      ansible.builtin.command: which docker
+      register: docker_which
+      changed_when: false
+      failed_when: false
+
+    - name: Instalar prerequisitos de Docker (apt repos) si no existe docker
+      ansible.builtin.package:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+      when: docker_which.rc != 0
+
+    - name: Instalar Docker (paquete distro) si no existe
       ansible.builtin.package:
         name: docker.io
         state: present
+      when: docker_which.rc != 0
 
     - name: Asegurar servicio Docker iniciado
       ansible.builtin.systemd:
@@ -73,7 +91,8 @@
           Group={{ SONARQUBE_RUN_USER }}
           Restart=always
           RestartSec=10
-          ExecStart=/usr/bin/docker run --rm \
+          # No usar --rm para poder inspeccionar el contenedor si falla
+          ExecStart=/usr/bin/docker run \
             --name {{ container_name }} \
             -p {{ SONARQUBE_PORT }}:9000 \
             -v {{ SONARQUBE_DATA_DIR }}:/opt/sonarqube/data \
@@ -105,10 +124,22 @@
       until: sq_http.status == 200
       ignore_errors: true
 
+    - name: Obtener logs del contenedor si no respondió
+      ansible.builtin.command: /usr/bin/docker logs --tail=60 {{ container_name }}
+      register: sq_logs
+      changed_when: false
+      when: sq_http.status is not defined or sq_http.status != 200
+      ignore_errors: true
+
     - name: Mostrar estado inicial del contenedor
-      ansible.builtin.command: docker ps --filter name=sonarqube --format '{{"{{.Names}}\t{{.Status}}"}}'
+      ansible.builtin.command: /usr/bin/docker ps --filter name=sonarqube --format '{{"{{.Names}}\t{{.Status}}"}}'
       register: docker_status
       changed_when: false
+
+    - name: Mostrar últimos logs SonarQube (si hubo fallo)
+      ansible.builtin.debug:
+        var: sq_logs.stdout_lines
+      when: sq_logs is defined
 
     - name: Imprimir instrucciones de acceso
       ansible.builtin.debug:
