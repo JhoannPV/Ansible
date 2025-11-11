@@ -159,9 +159,30 @@
             postgresqlUsername: "{{ SONARQUBE_DB_USER }}"
             postgresqlPassword: "{{ sq_db_password_effective }}"
             postgresqlDatabase: "{{ SONARQUBE_DB_NAME }}"
+            volumePermissions:
+              enabled: true
             primary:
               persistence:
                 enabled: true
+              # Afinar probes para MicroK8s/hostPath (inicialización lenta)
+              livenessProbe:
+                enabled: true
+                initialDelaySeconds: 180
+                periodSeconds: 10
+                timeoutSeconds: 5
+                failureThreshold: 60
+              readinessProbe:
+                enabled: true
+                initialDelaySeconds: 60
+                periodSeconds: 10
+                timeoutSeconds: 5
+                failureThreshold: 60
+              podSecurityContext:
+                fsGroup: 1001
+                runAsUser: 1001
+                runAsGroup: 1001
+              containerSecurityContext:
+                runAsUser: 1001
           # Forzar variables JDBC explícitas en SonarQube (por seguridad)
           sonarProperties:
             sonar.jdbc.username: "{{ SONARQUBE_DB_USER }}"
