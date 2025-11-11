@@ -27,6 +27,11 @@
     SONARQUBE_HELM_RELEASE: "sonarqube"
     SONARQUBE_STORAGE_SIZE: "8Gi"
     SONARQUBE_HOST: "{{ SONARQUBE_HOST | default('sonar.local') }}"
+    # Parámetros DB (puedes sobreescribir en vars/env.yml)
+    SONARQUBE_DB_USER: "{{ SONARQUBE_DB_USER | default('sonarUser') }}"
+    SONARQUBE_DB_NAME: "{{ SONARQUBE_DB_NAME | default('sonarDB') }}"
+    SONARQUBE_DB_PASSWORD: "{{ SONARQUBE_DB_PASSWORD | default(omit) }}"  # si no se define, se genera
+    SONARQUBE_FORCE_PG_RESET: "{{ SONARQUBE_FORCE_PG_RESET | default(false) }}"  # true para resetear PVC de Postgres antes del deploy
     helm_values_path: "/tmp/sonarqube-values.yaml"
     monitoring_passcode_length: 16
 
@@ -41,6 +46,17 @@
     - name: Generar monitoringPasscode aleatorio
       ansible.builtin.set_fact:
         monitoring_passcode: "{{ lookup('ansible.builtin.password', '/dev/null chars=ascii_letters,digits length=' + monitoring_passcode_length|string) }}"
+
+    - name: Generar SONARQUBE_DB_PASSWORD si no está definido
+      ansible.builtin.set_fact:
+        sq_db_password_generated: "{{ lookup('ansible.builtin.password', '/dev/null chars=ascii_letters,digits length=20') }}"
+      when: SONARQUBE_DB_PASSWORD is not defined
+      no_log: true
+
+    - name: Fijar password efectivo de DB
+      ansible.builtin.set_fact:
+        sq_db_password_effective: "{{ SONARQUBE_DB_PASSWORD if (SONARQUBE_DB_PASSWORD is defined) else sq_db_password_generated }}"
+      no_log: true
 
     - name: Habilitar addons necesarios (helm3, storage, ingress)
       ansible.builtin.command: "microk8s enable helm3 storage ingress"
@@ -91,6 +107,21 @@
             enabled: true
             storageClass: microk8s-hostpath
             size: {{ SONARQUBE_STORAGE_SIZE }}
+          # Configuración de Postgres subchart (Bitnami)
+          postgresql:
+            enabled: true
+            auth:
+              username: {{ SONARQUBE_DB_USER }}
+              database: {{ SONARQUBE_DB_NAME }}
+              password: {{ sq_db_password_effective }}
+            primary:
+              persistence:
+                enabled: true
+          # Forzar variables JDBC explícitas en SonarQube (por seguridad)
+          sonarProperties:
+            sonar.jdbc.username: "{{ SONARQUBE_DB_USER }}"
+            sonar.jdbc.password: "{{ sq_db_password_effective }}"
+            sonar.jdbc.url: "jdbc:postgresql://{{ SONARQUBE_HELM_RELEASE }}-postgresql:5432/{{ SONARQUBE_DB_NAME }}"
           # Seguridad del pod para acceso a volúmenes hostpath en MicroK8s
           securityContext:
             fsGroup: 1000
@@ -130,11 +161,22 @@
             requests:
               cpu: "500m"
               memory: "1Gi"
-          # Ajustar Java opts para entornos pequeños
+          # Ajustar Java opts para entornos pequeños (se añaden a sonarProperties)
           sonarProperties:
             sonar.ce.javaOpts: "-Xms384m -Xmx384m -XX:+HeapDumpOnOutOfMemoryError"
             sonar.web.javaOpts: "-Xms512m -Xmx512m -XX:+HeapDumpOnOutOfMemoryError"
             sonar.search.javaOpts: "-Xms512m -Xmx512m -XX:+HeapDumpOnOutOfMemoryError"
+    - name: Reset opcional de Postgres (eliminar STS y PVC) antes del Helm upgrade
+      ansible.builtin.shell: |
+        set -e
+        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} delete statefulset {{ SONARQUBE_HELM_RELEASE }}-postgresql --ignore-not-found
+        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} delete pvc -l app.kubernetes.io/name=postgresql,app.kubernetes.io/instance={{ SONARQUBE_HELM_RELEASE }} --ignore-not-found
+      args:
+        executable: /bin/bash
+      when: SONARQUBE_FORCE_PG_RESET | bool
+      register: pg_reset
+      changed_when: true
+
 
     - name: Instalar/Actualizar release SonarQube
       ansible.builtin.command: >-
