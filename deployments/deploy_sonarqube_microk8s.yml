@@ -163,8 +163,8 @@
               enabled: true
               image:
                 registry: "{{ SONARQUBE_POSTGRES_INIT_IMAGE.split('/')[0] }}"
-                repository: "{{ SONARQUBE_POSTGRES_INIT_IMAGE.split('/')[1].split(':')[0] }}"
-                tag: "{{ SONARQUBE_POSTGRES_INIT_IMAGE.split(':')[1] }}"
+                repository: "{{ SONARQUBE_POSTGRES_INIT_IMAGE.split('/')[1] }}/{{ SONARQUBE_POSTGRES_INIT_IMAGE.split('/')[2].split(':')[0] }}"
+                tag: "{{ SONARQUBE_POSTGRES_INIT_IMAGE.split(':')[-1] }}"
             primary:
               persistence:
                 enabled: true
