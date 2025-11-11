@@ -91,6 +91,12 @@
             enabled: true
             storageClass: microk8s-hostpath
             size: {{ SONARQUBE_STORAGE_SIZE }}
+          # Seguridad del pod para acceso a volúmenes hostpath en MicroK8s
+          securityContext:
+            fsGroup: 1000
+            fsGroupChangePolicy: OnRootMismatch
+            runAsUser: 1000
+            runAsGroup: 1000
           ingress:
             enabled: true
             hosts:
@@ -100,27 +106,20 @@
               kubernetes.io/ingress.class: public
             ingressClassName: public
             tls: []
+          # Ajuste de probes (usando claves soportadas por el chart)
           startupProbe:
             enabled: true
-            httpGet:
-              path: /api/system/status
-              port: http
-            initialDelaySeconds: 60
+            initialDelaySeconds: 90
             periodSeconds: 10
             timeoutSeconds: 5
-            failureThreshold: 90
+            failureThreshold: 120
           readinessProbe:
-            enabled: true
-            exec:
-              command:
-                - sh
-                - -c
-                - |
-                  #!/bin/bash
-                  if wget --no-proxy -qO- http://localhost:9000/api/system/status | grep -q -e '"status":"UP"' -e '"status":"DB_MIGRATION_NEEDED"' -e '"status":"DB_MIGRATION_RUNNING"'; then
-                    exit 0
-                  fi
-                  exit 1
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 20
+          livenessProbe:
+            initialDelaySeconds: 120
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 10
@@ -209,6 +208,68 @@
       failed_when: false
       when: rollout_sq.rc != 0
 
+    - name: Logs previos del contenedor principal (si existen)
+        
+      ansible.builtin.command:
+        argv:
+          - microk8s
+          - kubectl
+          - -n
+          - "{{ SONARQUBE_NAMESPACE }}"
+          - logs
+          - "{{ first_pod_name.stdout | default('') }}"
+          - -c
+          - sonarqube
+          - --previous
+          - --tail=1000
+      register: pod_logs_prev
+      changed_when: false
+      failed_when: false
+      when: rollout_sq.rc != 0 and (first_pod_name.stdout is defined and first_pod_name.stdout | length > 0)
+
+    - name: Contenido de /opt/sonarqube/logs dentro del pod (si está en ejecución)
+      ansible.builtin.command:
+        argv:
+          - microk8s
+          - kubectl
+          - -n
+          - "{{ SONARQUBE_NAMESPACE }}"
+          - exec
+          - "{{ first_pod_name.stdout | default('') }}"
+          - --
+          - sh
+          - -lc
+          - |
+            for f in /opt/sonarqube/logs/*.log; do echo "===== $f ====="; tail -n +1 "$f" || true; done
+      register: pod_file_logs
+      changed_when: false
+      failed_when: false
+      when: rollout_sq.rc != 0 and (first_pod_name.stdout is defined and first_pod_name.stdout | length > 0)
+
+    - name: Detalle PVC y PV de SonarQube
+      ansible.builtin.command: >-
+        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get pvc sonarqube-sonarqube -o yaml
+      register: pvc_detail
+      changed_when: false
+      failed_when: false
+      when: rollout_sq.rc != 0
+
+    - name: Estado Postgres (pods)
+      ansible.builtin.command: >-
+        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get pods -l app.kubernetes.io/name=postgresql -o wide
+      register: pg_pods
+      changed_when: false
+      failed_when: false
+      when: rollout_sq.rc != 0
+
+    - name: Logs Postgres (tail 200)
+      ansible.builtin.command: >-
+        microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} logs statefulset/sonarqube-postgresql --tail=200
+      register: pg_logs
+      changed_when: false
+      failed_when: false
+      when: rollout_sq.rc != 0
+
     - name: Eventos recientes relacionados (debug)
       ansible.builtin.shell: "microk8s kubectl -n {{ SONARQUBE_NAMESPACE }} get events --sort-by=.lastTimestamp | grep -i -E 'sonar|elastic|java|oom' || true"
       args:
@@ -230,6 +291,16 @@
           - "{{ pod_describe.stdout | default('No pod describe') }}"
           - "Logs (tail 200):" 
           - "{{ pod_logs.stdout | default('No logs') }}"
+          - "Logs previos (si hay):"
+          - "{{ pod_logs_prev.stdout | default('No previous logs') }}"
+          - "Logs en archivos dentro del contenedor:"
+          - "{{ pod_file_logs.stdout | default('No file logs') }}"
+          - "PVC detalle:"
+          - "{{ pvc_detail.stdout | default('No pvc detail') }}"
+          - "Postgres pods:"
+          - "{{ pg_pods.stdout | default('No pg pods') }}"
+          - "Postgres logs (tail 200):"
+          - "{{ pg_logs.stdout | default('No pg logs') }}"
           - "Eventos:" 
           - "{{ sq_events.stdout | default('No events') }}"
       when: rollout_sq.rc != 0
