@@ -191,8 +191,8 @@
           - "{{ pod_describe.stdout | default('No pod describe') }}"
           - "Logs (tail 200):" 
           - "{{ pod_logs.stdout | default('No logs') }}"
-      - "Eventos:" 
-      - "{{ sq_events.stdout | default('No events') }}"
+          - "Eventos:" 
+          - "{{ sq_events.stdout | default('No events') }}"
       when: rollout_sq.rc != 0
 
     - name: Fallar explícitamente si rollout no fue exitoso
