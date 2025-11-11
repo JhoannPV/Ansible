@@ -36,16 +36,26 @@
     - name: Recargar systemd
       ansible.builtin.command: systemctl daemon-reload
 
+    - name: Detectar binario docker (cleanup)
+      ansible.builtin.shell: "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin command -v docker"
+      register: docker_cmd_cleanup
+      changed_when: false
+      failed_when: false
+
+    - name: Definir docker_bin cleanup
+      ansible.builtin.set_fact:
+        docker_bin: "{{ (docker_cmd_cleanup.stdout | trim) if (docker_cmd_cleanup.rc == 0 and (docker_cmd_cleanup.stdout | trim) != '') else 'docker' }}"
+
     - name: Parar contenedor si quedó corriendo
-      ansible.builtin.command: docker stop {{ container_name }}
+      ansible.builtin.command: "{{ docker_bin }} stop {{ container_name }}"
       ignore_errors: true
 
     - name: Eliminar contenedor si existe
-      ansible.builtin.command: docker rm -f {{ container_name }}
+      ansible.builtin.command: "{{ docker_bin }} rm -f {{ container_name }}"
       ignore_errors: true
 
     - name: Eliminar imagen (opcional)
-      ansible.builtin.command: docker rmi {{ SONARQUBE_DOCKER_IMAGE }}
+      ansible.builtin.command: "{{ docker_bin }} rmi {{ SONARQUBE_DOCKER_IMAGE }}"
       ignore_errors: true
 
     - name: Eliminar datos en {{ SONARQUBE_DATA_DIR }} (¡destructivo!)
