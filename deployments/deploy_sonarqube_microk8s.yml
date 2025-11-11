@@ -103,11 +103,12 @@
           community:
             enabled: true
           monitoringPasscode: {{ monitoring_passcode }}
-          # Fuerza a usar los valores JDBC provistos aquí (evita lecturas de secrets inconsistentes)
-          jdbcOverwrite: true
-          jdbcUrl: "jdbc:postgresql://{{ SONARQUBE_HELM_RELEASE }}-postgresql:5432/{{ SONARQUBE_DB_NAME }}"
-          jdbcUsername: "{{ SONARQUBE_DB_USER }}"
-          jdbcPassword: "{{ sq_db_password_effective }}"
+          # Fuerza JDBC mediante objeto jdbcOverwrite según el esquema del chart
+          jdbcOverwrite:
+            enabled: true
+            jdbcUrl: "jdbc:postgresql://{{ SONARQUBE_HELM_RELEASE }}-postgresql:5432/{{ SONARQUBE_DB_NAME }}"
+            jdbcUsername: "{{ SONARQUBE_DB_USER }}"
+            jdbcPassword: "{{ sq_db_password_effective }}"
           persistence:
             enabled: true
             storageClass: microk8s-hostpath
