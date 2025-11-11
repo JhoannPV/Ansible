@@ -161,6 +161,10 @@
             postgresqlDatabase: "{{ SONARQUBE_DB_NAME }}"
             volumePermissions:
               enabled: true
+              image:
+                registry: "{{ SONARQUBE_POSTGRES_INIT_IMAGE.split('/')[0] }}"
+                repository: "{{ SONARQUBE_POSTGRES_INIT_IMAGE.split('/')[1].split(':')[0] }}"
+                tag: "{{ SONARQUBE_POSTGRES_INIT_IMAGE.split(':')[1] }}"
             primary:
               persistence:
                 enabled: true
