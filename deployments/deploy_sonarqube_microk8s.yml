@@ -356,36 +356,28 @@
       failed_when: false
       when: rollout_sq.rc != 0
 
+    - name: Construir diagnóstico de fallo rollout
+      ansible.builtin.set_fact:
+        diagnostic_info:
+          message: "Rollout SonarQube falló. Revisa la información de diagnóstico."
+          sts_describe: "{{ sts_describe.stdout | default('No STS describe') }}"
+          pods_list: "{{ sq_pods_list.stdout | default('No pods list') }}"
+          pod_describe: "{{ pod_describe.stdout | default('No pod describe') }}"
+          logs_tail: "{{ pod_logs.stdout | default('No logs') }}"
+          logs_previous: "{{ pod_logs_prev.stdout | default('No previous logs') }}"
+          file_logs: "{{ pod_file_logs.stdout | default('No file logs') }}"
+          pvc_detail: "{{ pvc_detail.stdout | default('No pvc detail') }}"
+          pg_pods: "{{ pg_pods.stdout | default('No pg pods') }}"
+          pg_logs_tail: "{{ pg_logs.stdout | default('No pg logs') }}"
+          events: "{{ sq_events.stdout | default('No events') }}"
+          cm_jdbc_cfg: "{{ cm_jdbc_cfg.stdout | default('No cm jdbc') }}"
+          cm_main_cfg: "{{ cm_main_cfg.stdout | default('No cm main') }}"
+          secret_pg_desc: "{{ secret_pg_desc.stdout | default('No secret desc') }}"
+      when: rollout_sq.rc != 0
+
     - name: Mostrar diagnóstico de fallo rollout
       ansible.builtin.debug:
-        msg:
-          - "Rollout SonarQube falló. Revisa la información de diagnóstico."
-          - "StatefulSet describe:" 
-          - "{{ sts_describe.stdout | default('No STS describe') }}"
-          - "Pods list:" 
-          - "{{ sq_pods_list.stdout | default('No pods list') }}"
-          - "Pod describe:" 
-          - "{{ pod_describe.stdout | default('No pod describe') }}"
-          - "Logs (tail 200):" 
-          - "{{ pod_logs.stdout | default('No logs') }}"
-          - "Logs previos (si hay):"
-          - "{{ pod_logs_prev.stdout | default('No previous logs') }}"
-          - "Logs en archivos dentro del contenedor:"
-          - "{{ pod_file_logs.stdout | default('No file logs') }}"
-          - "PVC detalle:"
-          - "{{ pvc_detail.stdout | default('No pvc detail') }}"
-          - "Postgres pods:"
-          - "{{ pg_pods.stdout | default('No pg pods') }}"
-          - "Postgres logs (tail 200):"
-          - "{{ pg_logs.stdout | default('No pg logs') }}"
-          - "Eventos:" 
-          - "{{ sq_events.stdout | default('No events') }}"
-      - "ConfigMap JDBC:" 
-      - "{{ cm_jdbc_cfg.stdout | default('No cm jdbc') }}"
-      - "ConfigMap principal:" 
-      - "{{ cm_main_cfg.stdout | default('No cm main') }}"
-      - "Secret Postgres (describe):" 
-      - "{{ secret_pg_desc.stdout | default('No secret desc') }}"
+        var: diagnostic_info
       when: rollout_sq.rc != 0
 
     # Remediación automática: crear usuario/DB en Postgres y reintentar rollout
