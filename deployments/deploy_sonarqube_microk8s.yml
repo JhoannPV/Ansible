@@ -162,9 +162,9 @@
             volumePermissions:
               enabled: true
               image:
-                registry: "{{ SONARQUBE_POSTGRES_INIT_IMAGE.split('/')[0] }}"
-                repository: "{{ SONARQUBE_POSTGRES_INIT_IMAGE.split('/')[1] }}/{{ SONARQUBE_POSTGRES_INIT_IMAGE.split('/')[2].split(':')[0] }}"
-                tag: "{{ SONARQUBE_POSTGRES_INIT_IMAGE.split(':')[-1] }}"
+                registry: "{{ 'docker.io' if '/' not in SONARQUBE_POSTGRES_INIT_IMAGE.split(':')[0] else SONARQUBE_POSTGRES_INIT_IMAGE.split(':')[0].split('/')[0] }}"
+                repository: "{{ SONARQUBE_POSTGRES_INIT_IMAGE.split(':')[0].split('/')[1:] | join('/') if '/' in SONARQUBE_POSTGRES_INIT_IMAGE.split(':')[0] else SONARQUBE_POSTGRES_INIT_IMAGE.split(':')[0] }}"
+                tag: "{{ SONARQUBE_POSTGRES_INIT_IMAGE.split(':')[1] if ':' in SONARQUBE_POSTGRES_INIT_IMAGE else 'latest' }}"
             primary:
               persistence:
                 enabled: true
