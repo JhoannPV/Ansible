@@ -58,15 +58,25 @@
       register: npm_version
       changed_when: false
 
+    - name: Instalar Yarn globalmente
+      ansible.builtin.command: npm install -g yarn
+      become: true
+
+    - name: Verificar versión de Yarn
+      ansible.builtin.command: yarn -v
+      register: yarn_version
+      changed_when: false
+
     - name: Mostrar versiones instaladas
       ansible.builtin.debug:
         msg:
           - "═══════════════════════════════════════════════════════════════"
-          - "  Node.js y npm instalados correctamente"
+          - "  Node.js, npm y Yarn instalados correctamente"
           - "═══════════════════════════════════════════════════════════════"
           - ""
           - "Node.js: {{ node_version.stdout }}"
           - "npm: {{ npm_version.stdout }}"
+          - "Yarn: {{ yarn_version.stdout }}"
           - ""
           - "IMPORTANTE: Reinicia el agente de Azure DevOps"
           - ""
