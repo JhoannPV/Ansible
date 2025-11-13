@@ -1,0 +1,70 @@
+---
+- name: Instalar Java en el agente de Azure DevOps
+  hosts: controller
+  vars_files:
+    - ./vars/env.yml
+
+  tasks:
+    - name: Actualizar cache de apt
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      become: true
+
+    - name: Instalar OpenJDK 17
+      ansible.builtin.apt:
+        name:
+          - openjdk-17-jdk
+          - openjdk-17-jre
+        state: present
+      become: true
+
+    - name: Verificar instalación de Java
+      ansible.builtin.command: java -version
+      register: java_version
+      changed_when: false
+
+    - name: Mostrar versión de Java
+      ansible.builtin.debug:
+        var: java_version.stderr_lines
+
+    - name: Establecer JAVA_HOME
+      ansible.builtin.lineinfile:
+        path: /etc/environment
+        line: 'JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"'
+        regexp: '^JAVA_HOME='
+        state: present
+      become: true
+
+    - name: Verificar que el servicio del agente está corriendo
+      ansible.builtin.systemd:
+        name: vsts.agent.*.service
+        state: restarted
+      become: true
+      ignore_errors: yes
+
+    - name: Verificar capabilities del agente
+      ansible.builtin.debug:
+        msg:
+          - "═══════════════════════════════════════════════════════════════"
+          - "  Java instalado correctamente"
+          - "═══════════════════════════════════════════════════════════════"
+          - ""
+          - "Versión instalada: OpenJDK 17"
+          - ""
+          - "El agente de Azure DevOps necesita reiniciarse para detectar Java."
+          - ""
+          - "Opciones para reiniciar el agente:"
+          - ""
+          - "1. Si el agente corre como servicio:"
+          - "   sudo systemctl restart vsts.agent.*.service"
+          - ""
+          - "2. Si el agente corre manualmente:"
+          - "   Detén el agente (Ctrl+C) y ejecuta nuevamente:"
+          - "   cd ~/myagent && ./run.sh"
+          - ""
+          - "3. O reinicia desde Azure DevOps:"
+          - "   Project Settings → Agent pools → myagent → Agents → Restart"
+          - ""
+          - "Después del reinicio, ejecuta el pipeline nuevamente."
+          - "═══════════════════════════════════════════════════════════════"
