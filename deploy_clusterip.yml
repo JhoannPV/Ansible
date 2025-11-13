@@ -98,10 +98,6 @@
         src: templates/k8s/mongodb-pvc.yaml.j2
         dest: "{{ k8s_tmp_dir }}/09-mongodb-pvc.yaml"
 
-    - name: Aplicar MongoDB PVC
-      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/09-mongodb-pvc.yaml"
-      become: false
-
     - name: Render MongoDB manifests
       ansible.builtin.template:
         src: templates/k8s/mongodb-deployment.yaml.j2
@@ -142,6 +138,10 @@
 
     - name: Aplicar secret
       ansible.builtin.command: "microk8s kubectl apply -f {{ k8s_tmp_dir }}/01-secret-env.yaml"
+
+    - name: Aplicar MongoDB PVC
+      ansible.builtin.command: "microk8s kubectl -n {{ K8S_NAMESPACE }} apply -f {{ k8s_tmp_dir }}/09-mongodb-pvc.yaml"
+      become: false
 
     - name: Desplegar MongoDB (deployment y service)
       ansible.builtin.shell: |
