@@ -1,5 +1,5 @@
 ---
-- name: Exponer SonarQube - Configurar nodo remoto
+- name: Exponer SonarQube mediante Ingress
   hosts: controller
   vars_files:
     - ./vars/env.yml
@@ -9,12 +9,53 @@
     sonarqube_hostname: "sonarqube.local"
 
   tasks:
-    - name: Obtener IP del nodo controlplane
+    - name: Obtener la IP del nodo controlplane
       ansible.builtin.shell: hostname -I | awk '{print $1}'
       register: node_ip
       changed_when: false
 
-    - name: Agregar entrada en /etc/hosts del controlplane
+    - name: Mostrar IP del nodo
+      ansible.builtin.debug:
+        msg: "IP del nodo controlplane: {{ node_ip.stdout }}"
+
+    - name: Verificar estado del Ingress Controller
+      ansible.builtin.command: "microk8s kubectl -n ingress get pods -o wide"
+      register: ingress_pods
+      changed_when: false
+
+    - name: Mostrar estado del Ingress Controller
+      ansible.builtin.debug:
+        var: ingress_pods.stdout_lines
+
+    - name: Verificar Ingress de SonarQube
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} get ingress sonarqube-ingress -o wide"
+      register: ingress_info
+      changed_when: false
+
+    - name: Mostrar Ingress de SonarQube
+      ansible.builtin.debug:
+        var: ingress_info.stdout_lines
+
+    - name: Verificar Service de SonarQube
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} get svc sonarqube -o wide"
+      register: svc_info
+      changed_when: false
+
+    - name: Mostrar Service de SonarQube
+      ansible.builtin.debug:
+        var: svc_info.stdout_lines
+
+    - name: Verificar Endpoints de SonarQube
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} get endpoints sonarqube -o wide"
+      register: ep_info
+      changed_when: false
+      failed_when: false
+
+    - name: Mostrar Endpoints de SonarQube
+      ansible.builtin.debug:
+        var: ep_info.stdout_lines
+
+    - name: Agregar entrada en /etc/hosts del nodo controlplane
       ansible.builtin.lineinfile:
         path: /etc/hosts
         line: "{{ node_ip.stdout }} {{ sonarqube_hostname }}"
@@ -23,58 +64,50 @@
         backup: yes
       become: true
 
-    - name: Guardar IP del controlplane
-      ansible.builtin.set_fact:
-        controlplane_ip: "{{ node_ip.stdout }}"
+    - name: Verificar entrada en /etc/hosts del controlplane
+      ansible.builtin.shell: cat /etc/hosts | grep {{ sonarqube_hostname }}
+      register: hosts_check
+      changed_when: false
 
-- name: Exponer SonarQube - Configurar máquina local
-  hosts: localhost
-  connection: local
-  gather_facts: no
+    - name: Mostrar entrada en /etc/hosts
+      ansible.builtin.debug:
+        var: hosts_check.stdout
 
-  vars:
-    sonarqube_hostname: "sonarqube.local"
-
-  tasks:
-    - name: Obtener IP del controlplane
-      ansible.builtin.set_fact:
-        controlplane_ip: "{{ hostvars[groups['controller'][0]]['controlplane_ip'] }}"
-
-    - name: Agregar entrada en /etc/hosts de la máquina local
-      ansible.builtin.lineinfile:
-        path: /etc/hosts
-        line: "{{ controlplane_ip }} {{ sonarqube_hostname }}"
-        state: present
-        regexp: ".*{{ sonarqube_hostname }}$"
-        backup: yes
-      become: true
-
-    - name: Verificar conectividad a SonarQube
+    - name: Probar conectividad desde el controlplane
       ansible.builtin.uri:
         url: "http://{{ sonarqube_hostname }}"
         method: GET
         status_code: [200, 302]
         timeout: 10
-      register: connectivity
+      register: remote_connectivity
       failed_when: false
       changed_when: false
 
-    - name: Mostrar resultado final
+    - name: Mostrar resultado de conectividad remota
+      ansible.builtin.debug:
+        msg: "Conectividad desde controlplane: {{ remote_connectivity.status is defined | ternary('✓ OK (Status: ' + (remote_connectivity.status | string) + ')', '✗ FALLO') }}"
+
+    - name: Instrucciones finales
       ansible.builtin.debug:
         msg:
           - "═══════════════════════════════════════════════════════════════"
-          - "  ✓ SonarQube configurado exitosamente"
+          - "  Configuración del nodo completada"
           - "═══════════════════════════════════════════════════════════════"
           - ""
-          - "Acceso configurado:"
-          - "  URL: http://{{ sonarqube_hostname }}"
-          - "  IP: {{ controlplane_ip }}"
+          - "Ahora en TU MÁQUINA LOCAL, ejecuta este comando:"
           - ""
-          - "Estado: {{ connectivity.status is defined and (connectivity.status == 200 or connectivity.status == 302) | ternary('✓ Accesible', '✗ No accesible aún (espera unos segundos)') }}"
+          - "  echo '{{ node_ip.stdout }} {{ sonarqube_hostname }}' | sudo tee -a /etc/hosts"
+          - ""
+          - "Luego abre tu navegador y accede a:"
+          - ""
+          - "  http://{{ sonarqube_hostname }}"
           - ""
           - "Credenciales:"
           - "  Usuario: admin"
           - "  Contraseña: admin"
           - ""
-          - "IMPORTANTE: Cambia la contraseña en el primer acceso"
+          - "Si no funciona, verifica:"
+          - "  1. Que el comando anterior se ejecutó en TU PC"
+          - "  2. Que los pods estén Running: microk8s kubectl -n {{ sonarqube_namespace }} get pods"
+          - "  3. Que el Ingress tenga ADDRESS configurada"
           - "═══════════════════════════════════════════════════════════════"
