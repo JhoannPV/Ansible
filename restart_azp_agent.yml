@@ -1,0 +1,82 @@
+---
+- name: Reiniciar agente de Azure DevOps
+  hosts: controller
+  vars_files:
+    - ./vars/env.yml
+
+  tasks:
+    - name: Buscar el nombre del servicio del agente
+      ansible.builtin.shell: systemctl list-units --type=service --all | grep vsts.agent | awk '{print $1}' | head -1
+      register: agent_service_name
+      changed_when: false
+      failed_when: false
+
+    - name: Mostrar nombre del servicio
+      ansible.builtin.debug:
+        msg: "Servicio encontrado: {{ agent_service_name.stdout }}"
+      when: agent_service_name.stdout != ""
+
+    - name: Reiniciar servicio del agente (si existe)
+      ansible.builtin.systemd:
+        name: "{{ agent_service_name.stdout }}"
+        state: restarted
+      become: true
+      when: agent_service_name.stdout != ""
+      register: service_restart
+
+    - name: Esperar 10 segundos para que el agente se inicie
+      ansible.builtin.pause:
+        seconds: 10
+      when: service_restart.changed
+
+    - name: Verificar estado del servicio
+      ansible.builtin.systemd:
+        name: "{{ agent_service_name.stdout }}"
+      register: service_status
+      become: true
+      when: agent_service_name.stdout != ""
+
+    - name: Mostrar estado del agente
+      ansible.builtin.debug:
+        msg:
+          - "═══════════════════════════════════════════════════════════════"
+          - "  Estado del agente de Azure DevOps"
+          - "═══════════════════════════════════════════════════════════════"
+          - ""
+          - "Servicio: {{ agent_service_name.stdout | default('No encontrado como servicio') }}"
+          - "Estado: {{ service_status.status.ActiveState | default('N/A') }}"
+          - ""
+          - "Si el agente NO corre como servicio, reinícialo manualmente:"
+          - ""
+          - "  ssh sysadmin@192.168.1.24"
+          - "  cd ~/myagent"
+          - "  ./run.sh"
+          - ""
+          - "Luego ejecuta el pipeline en Azure DevOps nuevamente."
+          - "El agente ahora debería tener la capability 'java' disponible."
+          - "═══════════════════════════════════════════════════════════════"
+
+    - name: Instrucción si no hay servicio
+      ansible.builtin.debug:
+        msg:
+          - "═══════════════════════════════════════════════════════════════"
+          - "  ATENCIÓN: No se encontró servicio del agente"
+          - "═══════════════════════════════════════════════════════════════"
+          - ""
+          - "El agente parece correr manualmente. Reinícialo así:"
+          - ""
+          - "1. Conéctate al servidor:"
+          - "   ssh sysadmin@192.168.1.24"
+          - ""
+          - "2. Detén el agente si está corriendo (Ctrl+C)"
+          - ""
+          - "3. Inicia el agente nuevamente:"
+          - "   cd ~/myagent"
+          - "   ./run.sh"
+          - ""
+          - "O mejor aún, configúralo como servicio:"
+          - "   cd ~/myagent"
+          - "   sudo ./svc.sh install"
+          - "   sudo ./svc.sh start"
+          - "═══════════════════════════════════════════════════════════════"
+      when: agent_service_name.stdout == ""
