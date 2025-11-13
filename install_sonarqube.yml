@@ -40,12 +40,21 @@
       changed_when: "'is already enabled' not in storage_enable.stdout"
 
     - name: Esperar a que el provisioner de storage esté listo
-      ansible.builtin.command: "microk8s kubectl -n kube-system get pods -l app=hostpath-provisioner"
+      ansible.builtin.shell: "microk8s kubectl -n kube-system get pods | grep -E '(hostpath|storage)' | grep Running || true"
       register: storage_pods
-      until: storage_pods.stdout is search('Running')
-      retries: 10
+      until: storage_pods.stdout != ""
+      retries: 15
       delay: 5
       changed_when: false
+
+    - name: Verificar StorageClass disponible
+      ansible.builtin.command: "microk8s kubectl get storageclass"
+      register: storageclass_check
+      changed_when: false
+
+    - name: Mostrar StorageClass disponibles
+      ansible.builtin.debug:
+        var: storageclass_check.stdout_lines
 
     - name: Render PersistentVolumeClaim para SonarQube data
       ansible.builtin.template:
