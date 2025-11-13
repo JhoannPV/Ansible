@@ -1,0 +1,137 @@
+---
+- name: Instalar SonarQube en MicroK8s
+  hosts: controller
+  connection: local
+  vars_files:
+    - ./vars/env.yml
+
+  vars:
+    k8s_tmp_dir: "/tmp/sonarqube-k8s"
+    sonarqube_namespace: "sonarqube"
+    sonarqube_image: "sonarqube:lts-community"
+    sonarqube_hostname: "sonarqube.local"
+
+  tasks:
+    - name: Crear directorio temporal para manifests
+      ansible.builtin.file:
+        path: "{{ k8s_tmp_dir }}"
+        state: directory
+        mode: '0755'
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+        recurse: true
+      become: true
+
+    - name: Crear namespace para SonarQube
+      ansible.builtin.command: "microk8s kubectl create namespace {{ sonarqube_namespace }} --dry-run=client -o yaml"
+      register: ns_yaml
+      changed_when: false
+
+    - name: Aplicar namespace
+      ansible.builtin.shell: |
+        echo "{{ ns_yaml.stdout }}" | microk8s kubectl apply -f -
+      args:
+        executable: /bin/bash
+
+    - name: Render PersistentVolumeClaim para SonarQube data
+      ansible.builtin.template:
+        src: ./templates/k8s/sonarqube-pvc.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/01-sonarqube-pvc.yaml"
+
+    - name: Aplicar PVC
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} apply -f {{ k8s_tmp_dir }}/01-sonarqube-pvc.yaml"
+
+    - name: Render Deployment de SonarQube
+      ansible.builtin.template:
+        src: ./templates/k8s/sonarqube-deployment.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/02-sonarqube-deployment.yaml"
+
+    - name: Aplicar Deployment
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} apply -f {{ k8s_tmp_dir }}/02-sonarqube-deployment.yaml"
+
+    - name: Render Service de SonarQube
+      ansible.builtin.template:
+        src: ./templates/k8s/sonarqube-service.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/03-sonarqube-service.yaml"
+
+    - name: Aplicar Service
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} apply -f {{ k8s_tmp_dir }}/03-sonarqube-service.yaml"
+
+    - name: Habilitar addon ingress en MicroK8s (idempotente)
+      ansible.builtin.command: microk8s enable ingress
+      become: true
+      register: ingress_enable
+      changed_when: "'Nothing to do for ingress' not in ingress_enable.stdout"
+
+    - name: Esperar a que el Ingress Controller esté listo
+      ansible.builtin.command: "microk8s kubectl -n ingress get pods"
+      register: ingress_pods
+      until: ingress_pods.stdout is search('Running')
+      retries: 15
+      delay: 8
+      changed_when: false
+
+    - name: Render Ingress de SonarQube
+      ansible.builtin.template:
+        src: ./templates/k8s/sonarqube-ingress.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/04-sonarqube-ingress.yaml"
+
+    - name: Aplicar Ingress
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} apply -f {{ k8s_tmp_dir }}/04-sonarqube-ingress.yaml"
+
+    - name: Esperar a que SonarQube esté listo
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} rollout status deployment/sonarqube --timeout=600s"
+      register: rollout_sonar
+      retries: 10
+      delay: 10
+      until: rollout_sonar.rc == 0
+
+    - name: Obtener información de los pods
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} get pods"
+      register: pods_out
+      changed_when: false
+
+    - name: Mostrar pods de SonarQube
+      ansible.builtin.debug:
+        var: pods_out.stdout_lines
+
+    - name: Obtener información del service
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} get svc sonarqube"
+      register: svc_out
+      changed_when: false
+
+    - name: Mostrar service de SonarQube
+      ansible.builtin.debug:
+        var: svc_out.stdout_lines
+
+    - name: Obtener información del Ingress
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} get ingress sonarqube-ingress"
+      register: ingress_out
+      changed_when: false
+
+    - name: Mostrar Ingress de SonarQube
+      ansible.builtin.debug:
+        var: ingress_out.stdout_lines
+
+    - name: Información de acceso
+      ansible.builtin.debug:
+        msg:
+          - "===================== INSTALACIÓN COMPLETADA ====================="
+          - "SonarQube ha sido desplegado exitosamente en el namespace '{{ sonarqube_namespace }}'"
+          - ""
+          - "Para acceder a SonarQube:"
+          - ""
+          - "OPCIÓN 1 - Usando Ingress (recomendado):"
+          - "  1. Añade en /etc/hosts: <IP_DEL_NODO> {{ sonarqube_hostname }}"
+          - "  2. Accede a: http://{{ sonarqube_hostname }}"
+          - ""
+          - "OPCIÓN 2 - Usando Port-forward:"
+          - "  1. Ejecuta: microk8s kubectl -n {{ sonarqube_namespace }} port-forward svc/sonarqube 9000:9000"
+          - "  2. Accede a: http://localhost:9000"
+          - ""
+          - "Credenciales por defecto:"
+          - "  Usuario: admin"
+          - "  Contraseña: admin"
+          - ""
+          - "IMPORTANTE: Cambia la contraseña en el primer acceso"
+          - "=================================================================="
