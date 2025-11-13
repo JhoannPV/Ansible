@@ -79,11 +79,30 @@
     - name: Aplicar Ingress
       ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} apply -f {{ k8s_tmp_dir }}/04-sonarqube-ingress.yaml"
 
-    - name: Esperar a que SonarQube esté listo
-      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} rollout status deployment/sonarqube --timeout=600s"
-      register: rollout_sonar
-      retries: 10
+    - name: Esperar a que el pod de SonarQube se cree
+      ansible.builtin.shell: "microk8s kubectl -n {{ sonarqube_namespace }} get pods -l app=sonarqube -o jsonpath='{.items[*].status.phase}'"
+      register: pod_phase
+      until: pod_phase.stdout != ""
+      retries: 30
       delay: 10
+      changed_when: false
+
+    - name: Verificar logs del pod de SonarQube (si hay errores)
+      ansible.builtin.shell: "microk8s kubectl -n {{ sonarqube_namespace }} logs -l app=sonarqube --tail=50 || true"
+      register: sonar_logs
+      changed_when: false
+      when: pod_phase.stdout is defined
+
+    - name: Mostrar logs recientes de SonarQube
+      ansible.builtin.debug:
+        var: sonar_logs.stdout_lines
+      when: sonar_logs.stdout is defined and sonar_logs.stdout != ""
+
+    - name: Esperar a que SonarQube esté listo (esto puede tardar varios minutos)
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} rollout status deployment/sonarqube --timeout=900s"
+      register: rollout_sonar
+      retries: 3
+      delay: 30
       until: rollout_sonar.rc == 0
 
     - name: Obtener información de los pods
