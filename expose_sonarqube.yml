@@ -1,7 +1,6 @@
 ---
-- name: Exponer SonarQube mediante hosts
+- name: Obtener información para exponer SonarQube
   hosts: controller
-  connection: local
   vars_files:
     - ./vars/env.yml
 
@@ -10,17 +9,12 @@
     sonarqube_hostname: "sonarqube.local"
 
   tasks:
-    - name: Obtener la IP del nodo donde corre el Ingress Controller
-      ansible.builtin.shell: |
-        microk8s kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}'
+    - name: Obtener IP del nodo controlplane
+      ansible.builtin.shell: hostname -I | awk '{print $1}'
       register: node_ip
       changed_when: false
 
-    - name: Mostrar IP del nodo
-      ansible.builtin.debug:
-        msg: "IP del nodo: {{ node_ip.stdout }}"
-
-    - name: Verificar si la entrada ya existe en /etc/hosts
+    - name: Agregar entrada en /etc/hosts del nodo remoto
       ansible.builtin.lineinfile:
         path: /etc/hosts
         line: "{{ node_ip.stdout }} {{ sonarqube_hostname }}"
@@ -28,7 +22,32 @@
         regexp: ".*{{ sonarqube_hostname }}$"
         backup: yes
       become: true
-      register: hosts_updated
+
+    - name: Guardar IP para uso local
+      ansible.builtin.set_fact:
+        ip_para_local: "{{ node_ip.stdout }}"
+
+    - name: Mostrar instrucciones para máquina local
+      ansible.builtin.debug:
+        msg:
+          - "═══════════════════════════════════════════════════════════════"
+          - "  Configuración completada en el nodo remoto"
+          - "═══════════════════════════════════════════════════════════════"
+          - ""
+          - "Para acceder desde tu máquina local, ejecuta este comando:"
+          - ""
+          - "  echo '{{ node_ip.stdout }} {{ sonarqube_hostname }}' | sudo tee -a /etc/hosts"
+          - ""
+          - "O agrega manualmente esta línea a /etc/hosts:"
+          - ""
+          - "  {{ node_ip.stdout }} {{ sonarqube_hostname }}"
+          - ""
+          - "Luego accede a: http://{{ sonarqube_hostname }}"
+          - ""
+          - "Credenciales:"
+          - "  Usuario: admin"
+          - "  Contraseña: admin"
+          - "═══════════════════════════════════════════════════════════════"
 
     - name: Mostrar resultado
       ansible.builtin.debug:
