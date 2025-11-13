@@ -1,5 +1,5 @@
 ---
-- name: Obtener información para exponer SonarQube
+- name: Exponer SonarQube - Configurar nodo remoto
   hosts: controller
   vars_files:
     - ./vars/env.yml
@@ -14,7 +14,7 @@
       register: node_ip
       changed_when: false
 
-    - name: Agregar entrada en /etc/hosts del nodo remoto
+    - name: Agregar entrada en /etc/hosts del controlplane
       ansible.builtin.lineinfile:
         path: /etc/hosts
         line: "{{ node_ip.stdout }} {{ sonarqube_hostname }}"
@@ -23,28 +23,58 @@
         backup: yes
       become: true
 
-    - name: Guardar IP para uso local
+    - name: Guardar IP del controlplane
       ansible.builtin.set_fact:
-        ip_para_local: "{{ node_ip.stdout }}"
+        controlplane_ip: "{{ node_ip.stdout }}"
 
-    - name: Mostrar instrucciones para máquina local
+- name: Exponer SonarQube - Configurar máquina local
+  hosts: localhost
+  connection: local
+  gather_facts: no
+
+  vars:
+    sonarqube_hostname: "sonarqube.local"
+
+  tasks:
+    - name: Obtener IP del controlplane
+      ansible.builtin.set_fact:
+        controlplane_ip: "{{ hostvars[groups['controller'][0]]['controlplane_ip'] }}"
+
+    - name: Agregar entrada en /etc/hosts de la máquina local
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "{{ controlplane_ip }} {{ sonarqube_hostname }}"
+        state: present
+        regexp: ".*{{ sonarqube_hostname }}$"
+        backup: yes
+      become: true
+
+    - name: Verificar conectividad a SonarQube
+      ansible.builtin.uri:
+        url: "http://{{ sonarqube_hostname }}"
+        method: GET
+        status_code: [200, 302]
+        timeout: 10
+      register: connectivity
+      failed_when: false
+      changed_when: false
+
+    - name: Mostrar resultado final
       ansible.builtin.debug:
         msg:
           - "═══════════════════════════════════════════════════════════════"
-          - "  Configuración completada en el nodo remoto"
+          - "  ✓ SonarQube configurado exitosamente"
           - "═══════════════════════════════════════════════════════════════"
           - ""
-          - "Para acceder desde tu máquina local, ejecuta este comando:"
+          - "Acceso configurado:"
+          - "  URL: http://{{ sonarqube_hostname }}"
+          - "  IP: {{ controlplane_ip }}"
           - ""
-          - "  echo '{{ node_ip.stdout }} {{ sonarqube_hostname }}' | sudo tee -a /etc/hosts"
-          - ""
-          - "O agrega manualmente esta línea a /etc/hosts:"
-          - ""
-          - "  {{ node_ip.stdout }} {{ sonarqube_hostname }}"
-          - ""
-          - "Luego accede a: http://{{ sonarqube_hostname }}"
+          - "Estado: {{ connectivity.status is defined and (connectivity.status == 200 or connectivity.status == 302) | ternary('✓ Accesible', '✗ No accesible aún (espera unos segundos)') }}"
           - ""
           - "Credenciales:"
           - "  Usuario: admin"
           - "  Contraseña: admin"
+          - ""
+          - "IMPORTANTE: Cambia la contraseña en el primer acceso"
           - "═══════════════════════════════════════════════════════════════"
