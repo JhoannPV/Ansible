@@ -11,11 +11,19 @@
         cache_valid_time: 3600
       become: true
 
-    - name: Instalar OpenJDK 17
+    - name: Buscar versiones de Java disponibles
+      ansible.builtin.shell: apt-cache search openjdk | grep -E "openjdk-[0-9]+-jdk" | sort
+      register: java_packages
+      changed_when: false
+
+    - name: Mostrar paquetes Java disponibles
+      ansible.builtin.debug:
+        var: java_packages.stdout_lines
+
+    - name: Instalar OpenJDK (versión disponible)
       ansible.builtin.apt:
         name:
-          - openjdk-17-jdk
-          - openjdk-17-jre
+          - default-jdk
         state: present
       become: true
 
@@ -28,13 +36,22 @@
       ansible.builtin.debug:
         var: java_version.stderr_lines
 
+    - name: Obtener la ruta de JAVA_HOME
+      ansible.builtin.shell: update-alternatives --query java | grep 'Value:' | awk '{print $2}' | sed 's|/bin/java||'
+      register: java_home_path
+      changed_when: false
+
     - name: Establecer JAVA_HOME
       ansible.builtin.lineinfile:
         path: /etc/environment
-        line: 'JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"'
+        line: 'JAVA_HOME="{{ java_home_path.stdout }}"'
         regexp: '^JAVA_HOME='
         state: present
       become: true
+
+    - name: Mostrar JAVA_HOME
+      ansible.builtin.debug:
+        msg: "JAVA_HOME configurado en: {{ java_home_path.stdout }}"
 
     - name: Verificar que el servicio del agente está corriendo
       ansible.builtin.systemd:
@@ -50,7 +67,8 @@
           - "  Java instalado correctamente"
           - "═══════════════════════════════════════════════════════════════"
           - ""
-          - "Versión instalada: OpenJDK 17"
+          - "Versión instalada: {{ java_version.stderr_lines[0] | default('Java') }}"
+          - "JAVA_HOME: {{ java_home_path.stdout }}"
           - ""
           - "El agente de Azure DevOps necesita reiniciarse para detectar Java."
           - ""
