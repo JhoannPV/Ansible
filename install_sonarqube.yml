@@ -87,16 +87,52 @@
       delay: 10
       changed_when: false
 
-    - name: Verificar logs del pod de SonarQube (si hay errores)
-      ansible.builtin.shell: "microk8s kubectl -n {{ sonarqube_namespace }} logs -l app=sonarqube --tail=50 || true"
+    - name: Obtener detalles completos del pod
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} get pods -l app=sonarqube -o wide"
+      register: pod_details
+      changed_when: false
+
+    - name: Mostrar detalles del pod
+      ansible.builtin.debug:
+        var: pod_details.stdout_lines
+
+    - name: Describir el pod para ver eventos y errores
+      ansible.builtin.shell: "microk8s kubectl -n {{ sonarqube_namespace }} describe pods -l app=sonarqube | tail -50"
+      register: pod_describe
+      changed_when: false
+
+    - name: Mostrar eventos del pod
+      ansible.builtin.debug:
+        var: pod_describe.stdout_lines
+
+    - name: Verificar estado de los PVCs
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} get pvc"
+      register: pvc_status
+      changed_when: false
+
+    - name: Mostrar estado de los PVCs
+      ansible.builtin.debug:
+        var: pvc_status.stdout_lines
+
+    - name: Verificar logs del initContainer (sysctl)
+      ansible.builtin.shell: "microk8s kubectl -n {{ sonarqube_namespace }} logs -l app=sonarqube -c init-sysctl || true"
+      register: init_logs
+      changed_when: false
+
+    - name: Mostrar logs del initContainer
+      ansible.builtin.debug:
+        var: init_logs.stdout_lines
+      when: init_logs.stdout != ""
+
+    - name: Verificar logs del contenedor principal de SonarQube
+      ansible.builtin.shell: "microk8s kubectl -n {{ sonarqube_namespace }} logs -l app=sonarqube -c sonarqube --tail=100 || true"
       register: sonar_logs
       changed_when: false
-      when: pod_phase.stdout is defined
 
-    - name: Mostrar logs recientes de SonarQube
+    - name: Mostrar logs de SonarQube
       ansible.builtin.debug:
         var: sonar_logs.stdout_lines
-      when: sonar_logs.stdout is defined and sonar_logs.stdout != ""
+      when: sonar_logs.stdout != ""
 
     - name: Esperar a que SonarQube esté listo (esto puede tardar varios minutos)
       ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} rollout status deployment/sonarqube --timeout=900s"
@@ -104,6 +140,19 @@
       retries: 3
       delay: 30
       until: rollout_sonar.rc == 0
+      failed_when: false
+
+    - name: Verificar si el rollout falló
+      ansible.builtin.fail:
+        msg: |
+          El deployment de SonarQube no pudo completarse.
+          Revisa los logs y eventos mostrados arriba para diagnosticar el problema.
+          Comandos útiles para debug:
+            - microk8s kubectl -n {{ sonarqube_namespace }} get pods
+            - microk8s kubectl -n {{ sonarqube_namespace }} describe pod <pod-name>
+            - microk8s kubectl -n {{ sonarqube_namespace }} logs <pod-name> -c sonarqube
+            - microk8s kubectl -n {{ sonarqube_namespace }} get events --sort-by='.lastTimestamp'
+      when: rollout_sonar.rc != 0
 
     - name: Obtener información de los pods
       ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} get pods"
