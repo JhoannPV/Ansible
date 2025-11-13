@@ -1,0 +1,83 @@
+---
+- name: Instalar Node.js en el agente de Azure DevOps
+  hosts: controller
+  vars_files:
+    - ./vars/env.yml
+
+  tasks:
+    - name: Actualizar cache de apt
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      become: true
+
+    - name: Instalar dependencias necesarias
+      ansible.builtin.apt:
+        name:
+          - curl
+          - ca-certificates
+          - gnupg
+        state: present
+      become: true
+
+    - name: Crear directorio para llaves de apt
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+      become: true
+
+    - name: Descargar y agregar clave GPG de NodeSource
+      ansible.builtin.shell: |
+        curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+      args:
+        creates: /etc/apt/keyrings/nodesource.gpg
+      become: true
+
+    - name: Agregar repositorio de Node.js 20.x
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main"
+        state: present
+        filename: nodesource
+      become: true
+
+    - name: Instalar Node.js
+      ansible.builtin.apt:
+        name: nodejs
+        state: present
+        update_cache: yes
+      become: true
+
+    - name: Verificar versión de Node.js
+      ansible.builtin.command: node -v
+      register: node_version
+      changed_when: false
+
+    - name: Verificar versión de npm
+      ansible.builtin.command: npm -v
+      register: npm_version
+      changed_when: false
+
+    - name: Mostrar versiones instaladas
+      ansible.builtin.debug:
+        msg:
+          - "═══════════════════════════════════════════════════════════════"
+          - "  Node.js y npm instalados correctamente"
+          - "═══════════════════════════════════════════════════════════════"
+          - ""
+          - "Node.js: {{ node_version.stdout }}"
+          - "npm: {{ npm_version.stdout }}"
+          - ""
+          - "IMPORTANTE: Reinicia el agente de Azure DevOps"
+          - ""
+          - "Opciones para reiniciar:"
+          - ""
+          - "1. Si corre como servicio:"
+          - "   sudo systemctl restart vsts.agent.*.service"
+          - ""
+          - "2. Si corre manualmente:"
+          - "   Detén el agente (Ctrl+C) y ejecuta:"
+          - "   cd ~/myagent && ./run.sh"
+          - ""
+          - "Después del reinicio, ejecuta el pipeline nuevamente."
+          - "═══════════════════════════════════════════════════════════════"
