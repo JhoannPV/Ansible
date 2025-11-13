@@ -39,7 +39,7 @@ spec:
               protocol: TCP
           env:
             - name: SONAR_JDBC_URL
-              value: "jdbc:h2:file:/opt/sonarqube/data/sonar"
+              value: "jdbc:postgresql://postgres:5432/sonarqube"
             - name: SONAR_JDBC_USERNAME
               value: "sonar"
             - name: SONAR_JDBC_PASSWORD

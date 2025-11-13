@@ -56,29 +56,60 @@
       ansible.builtin.debug:
         var: storageclass_check.stdout_lines
 
+    - name: Render PersistentVolumeClaim para PostgreSQL
+      ansible.builtin.template:
+        src: ./templates/k8s/postgres-pvc.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/01-postgres-pvc.yaml"
+
+    - name: Aplicar PVC de PostgreSQL
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} apply -f {{ k8s_tmp_dir }}/01-postgres-pvc.yaml"
+
+    - name: Render Deployment de PostgreSQL
+      ansible.builtin.template:
+        src: ./templates/k8s/postgres-deployment.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/02-postgres-deployment.yaml"
+
+    - name: Aplicar Deployment de PostgreSQL
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} apply -f {{ k8s_tmp_dir }}/02-postgres-deployment.yaml"
+
+    - name: Render Service de PostgreSQL
+      ansible.builtin.template:
+        src: ./templates/k8s/postgres-service.yaml.j2
+        dest: "{{ k8s_tmp_dir }}/03-postgres-service.yaml"
+
+    - name: Aplicar Service de PostgreSQL
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} apply -f {{ k8s_tmp_dir }}/03-postgres-service.yaml"
+
+    - name: Esperar a que PostgreSQL esté listo
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} rollout status deployment/postgres --timeout=300s"
+      register: postgres_rollout
+      retries: 3
+      delay: 10
+      until: postgres_rollout.rc == 0
+
     - name: Render PersistentVolumeClaim para SonarQube data
       ansible.builtin.template:
         src: ./templates/k8s/sonarqube-pvc.yaml.j2
-        dest: "{{ k8s_tmp_dir }}/01-sonarqube-pvc.yaml"
+        dest: "{{ k8s_tmp_dir }}/04-sonarqube-pvc.yaml"
 
     - name: Aplicar PVC
-      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} apply -f {{ k8s_tmp_dir }}/01-sonarqube-pvc.yaml"
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} apply -f {{ k8s_tmp_dir }}/04-sonarqube-pvc.yaml"
 
     - name: Render Deployment de SonarQube
       ansible.builtin.template:
         src: ./templates/k8s/sonarqube-deployment.yaml.j2
-        dest: "{{ k8s_tmp_dir }}/02-sonarqube-deployment.yaml"
+        dest: "{{ k8s_tmp_dir }}/05-sonarqube-deployment.yaml"
 
     - name: Aplicar Deployment
-      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} apply -f {{ k8s_tmp_dir }}/02-sonarqube-deployment.yaml"
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} apply -f {{ k8s_tmp_dir }}/05-sonarqube-deployment.yaml"
 
     - name: Render Service de SonarQube
       ansible.builtin.template:
         src: ./templates/k8s/sonarqube-service.yaml.j2
-        dest: "{{ k8s_tmp_dir }}/03-sonarqube-service.yaml"
+        dest: "{{ k8s_tmp_dir }}/06-sonarqube-service.yaml"
 
     - name: Aplicar Service
-      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} apply -f {{ k8s_tmp_dir }}/03-sonarqube-service.yaml"
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} apply -f {{ k8s_tmp_dir }}/06-sonarqube-service.yaml"
 
     - name: Habilitar addon ingress en MicroK8s (idempotente)
       ansible.builtin.command: microk8s enable ingress
@@ -97,10 +128,10 @@
     - name: Render Ingress de SonarQube
       ansible.builtin.template:
         src: ./templates/k8s/sonarqube-ingress.yaml.j2
-        dest: "{{ k8s_tmp_dir }}/04-sonarqube-ingress.yaml"
+        dest: "{{ k8s_tmp_dir }}/07-sonarqube-ingress.yaml"
 
     - name: Aplicar Ingress
-      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} apply -f {{ k8s_tmp_dir }}/04-sonarqube-ingress.yaml"
+      ansible.builtin.command: "microk8s kubectl -n {{ sonarqube_namespace }} apply -f {{ k8s_tmp_dir }}/07-sonarqube-ingress.yaml"
 
     - name: Esperar a que el pod de SonarQube se cree
       ansible.builtin.shell: "microk8s kubectl -n {{ sonarqube_namespace }} get pods -l app=sonarqube -o jsonpath='{.items[*].status.phase}'"
