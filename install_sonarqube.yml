@@ -33,6 +33,20 @@
       args:
         executable: /bin/bash
 
+    - name: Habilitar addon hostpath-storage en MicroK8s (requerido para PVCs)
+      ansible.builtin.command: microk8s enable hostpath-storage
+      become: true
+      register: storage_enable
+      changed_when: "'is already enabled' not in storage_enable.stdout"
+
+    - name: Esperar a que el provisioner de storage esté listo
+      ansible.builtin.command: "microk8s kubectl -n kube-system get pods -l app=hostpath-provisioner"
+      register: storage_pods
+      until: storage_pods.stdout is search('Running')
+      retries: 10
+      delay: 5
+      changed_when: false
+
     - name: Render PersistentVolumeClaim para SonarQube data
       ansible.builtin.template:
         src: ./templates/k8s/sonarqube-pvc.yaml.j2
