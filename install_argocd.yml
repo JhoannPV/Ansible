@@ -37,6 +37,29 @@
         - argocd-dex-server
       register: rollout_deploy
       changed_when: false
+      failed_when: false
+
+    - name: Verificar estado de los pods de ArgoCD
+      ansible.builtin.command: "{{ kubectl_cmd }} -n {{ argocd_namespace }} get pods -o wide"
+      register: argocd_pods
+      changed_when: false
+
+    - name: Mostrar estado de los pods
+      ansible.builtin.debug:
+        var: argocd_pods.stdout_lines
+
+    - name: Describir pods con problemas (si existen)
+      ansible.builtin.shell: |
+        {{ kubectl_cmd }} -n {{ argocd_namespace }} get pods --field-selector=status.phase!=Running -o name | \
+        xargs -I {} {{ kubectl_cmd }} -n {{ argocd_namespace }} describe {}
+      register: problem_pods
+      changed_when: false
+      failed_when: false
+
+    - name: Mostrar descripción de pods con problemas
+      ansible.builtin.debug:
+        var: problem_pods.stdout_lines
+      when: problem_pods.stdout != ""
 
     - name: Esperar rollout de StatefulSet del application-controller (si existe)
       ansible.builtin.command: "{{ kubectl_cmd }} -n {{ argocd_namespace }} get statefulset argocd-application-controller -o name"
