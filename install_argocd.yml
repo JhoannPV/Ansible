@@ -8,7 +8,7 @@
 
   tasks:
     - name: Verificar que kubectl está instalado y accesible
-      ansible.builtin.command: kubectl version --client --output=yaml
+      ansible.builtin.command: kubectl version --short
       changed_when: false
       register: kubectl_version
       failed_when: kubectl_version.rc != 0
