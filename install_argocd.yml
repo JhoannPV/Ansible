@@ -5,31 +5,32 @@
   vars:
     argocd_namespace: argocd
     argocd_manifest_url: https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+    kubectl_cmd: microk8s kubectl
 
   tasks:
     - name: Verificar que kubectl está instalado y accesible
-      ansible.builtin.command: kubectl version
+      ansible.builtin.command: "{{ kubectl_cmd }} version"
       changed_when: false
       register: kubectl_version
       failed_when: kubectl_version.rc != 0
 
     - name: Comprobar si el namespace {{ argocd_namespace }} ya existe
-      ansible.builtin.command: kubectl get ns {{ argocd_namespace }}
+      ansible.builtin.command: "{{ kubectl_cmd }} get ns {{ argocd_namespace }}"
       register: ns_check
       changed_when: false
       failed_when: false
 
     - name: Crear el namespace {{ argocd_namespace }} si no existe
-      ansible.builtin.command: kubectl create namespace {{ argocd_namespace }}
+      ansible.builtin.command: "{{ kubectl_cmd }} create namespace {{ argocd_namespace }}"
       when: ns_check.rc != 0
 
     - name: Instalar/actualizar Argo CD aplicando el manifiesto oficial
-      ansible.builtin.command: kubectl apply -n {{ argocd_namespace }} -f {{ argocd_manifest_url }}
+      ansible.builtin.command: "{{ kubectl_cmd }} apply -n {{ argocd_namespace }} -f {{ argocd_manifest_url }}"
       register: argocd_apply
       changed_when: argocd_apply.rc == 0
 
     - name: Esperar rollout de Deployments de Argo CD
-      ansible.builtin.command: kubectl -n {{ argocd_namespace }} rollout status deploy/{{ item }} --timeout=600s
+      ansible.builtin.command: "{{ kubectl_cmd }} -n {{ argocd_namespace }} rollout status deploy/{{ item }} --timeout=600s"
       loop:
         - argocd-server
         - argocd-repo-server
@@ -38,19 +39,19 @@
       changed_when: false
 
     - name: Esperar rollout de StatefulSet del application-controller (si existe)
-      ansible.builtin.command: kubectl -n {{ argocd_namespace }} get statefulset argocd-application-controller -o name
+      ansible.builtin.command: "{{ kubectl_cmd }} -n {{ argocd_namespace }} get statefulset argocd-application-controller -o name"
       register: has_ss
       changed_when: false
       failed_when: false
 
     - name: Esperar rollout del StatefulSet argocd-application-controller
-      ansible.builtin.command: kubectl -n {{ argocd_namespace }} rollout status statefulset/argocd-application-controller --timeout=600s
+      ansible.builtin.command: "{{ kubectl_cmd }} -n {{ argocd_namespace }} rollout status statefulset/argocd-application-controller --timeout=600s"
       when: has_ss.rc == 0 and (has_ss.stdout | trim) != ""
       changed_when: false
 
     - name: Obtener contraseña inicial del usuario admin (secreto)
       ansible.builtin.command: >-
-        kubectl -n {{ argocd_namespace }} get secret argocd-initial-admin-secret
+        {{ kubectl_cmd }} -n {{ argocd_namespace }} get secret argocd-initial-admin-secret
         -o jsonpath='{.data.password}'
       register: argocd_initial_password_b64
       changed_when: false
@@ -67,12 +68,12 @@
         msg:
           - "Argo CD instalado/aplicado en el namespace '{{ argocd_namespace }}'."
           - "Despliegues principales listos (server, repo-server, dex-server)."
-          - "Para exponer la UI, puedes hacer port-forward: kubectl -n {{ argocd_namespace }} port-forward svc/argocd-server 8080:443"
+          - "Para exponer la UI, puedes hacer port-forward: {{ kubectl_cmd }} -n {{ argocd_namespace }} port-forward svc/argocd-server 8080:443"
           - >-
             {{
               ("Contraseña inicial admin (oculta): valor disponible en variable 'argocd_initial_admin_password'"
                if (argocd_initial_admin_password | default('')) != '' else
-               "No se pudo capturar la contraseña inicial automáticamente. Obtenla con: kubectl -n " ~ argocd_namespace ~ " get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d")
+               "No se pudo capturar la contraseña inicial automáticamente. Obtenla con: " ~ kubectl_cmd ~ " -n " ~ argocd_namespace ~ " get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d")
             }}
       no_log: true
 
