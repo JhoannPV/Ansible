@@ -14,6 +14,39 @@
       register: node_ip
       changed_when: false
 
+    - name: Crear Ingress para ArgoCD
+      ansible.builtin.copy:
+        content: |
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: argocd-server-ingress
+            namespace: {{ argocd_namespace }}
+            annotations:
+              nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+              nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+              nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+          spec:
+            ingressClassName: nginx
+            rules:
+            - host: {{ argocd_hostname }}
+              http:
+                paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: argocd-server
+                      port:
+                        name: https
+        dest: /tmp/argocd-ingress.yaml
+        mode: '0644'
+
+    - name: Aplicar Ingress de ArgoCD
+      ansible.builtin.command: "microk8s kubectl apply -f /tmp/argocd-ingress.yaml"
+      register: ingress_apply
+      changed_when: "'configured' in ingress_apply.stdout or 'created' in ingress_apply.stdout"
+
     - name: Mostrar IP del nodo
       ansible.builtin.debug:
         msg: "IP del nodo controlplane: {{ node_ip.stdout }}"
