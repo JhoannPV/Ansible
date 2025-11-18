@@ -1,0 +1,128 @@
+---
+- name: Exponer ArgoCD mediante Ingress
+  hosts: controller
+  vars_files:
+    - ./vars/env.yml
+
+  vars:
+    argocd_namespace: "argocd"
+    argocd_hostname: "argocd.local"
+
+  tasks:
+    - name: Obtener la IP del nodo controlplane
+      ansible.builtin.shell: hostname -I | awk '{print $1}'
+      register: node_ip
+      changed_when: false
+
+    - name: Mostrar IP del nodo
+      ansible.builtin.debug:
+        msg: "IP del nodo controlplane: {{ node_ip.stdout }}"
+
+    - name: Verificar estado del Ingress Controller
+      ansible.builtin.command: "microk8s kubectl -n ingress get pods -o wide"
+      register: ingress_pods
+      changed_when: false
+
+    - name: Mostrar estado del Ingress Controller
+      ansible.builtin.debug:
+        var: ingress_pods.stdout_lines
+
+    - name: Verificar Ingress de ArgoCD
+      ansible.builtin.command: "microk8s kubectl -n {{ argocd_namespace }} get ingress argocd-ingress -o wide"
+      register: ingress_info
+      changed_when: false
+      failed_when: false
+
+    - name: Mostrar Ingress de ArgoCD
+      ansible.builtin.debug:
+        var: ingress_info.stdout_lines
+
+    - name: Verificar Service de ArgoCD Server
+      ansible.builtin.command: "microk8s kubectl -n {{ argocd_namespace }} get svc argocd-server -o wide"
+      register: svc_info
+      changed_when: false
+
+    - name: Mostrar Service de ArgoCD Server
+      ansible.builtin.debug:
+        var: svc_info.stdout_lines
+
+    - name: Verificar Endpoints de ArgoCD Server
+      ansible.builtin.command: "microk8s kubectl -n {{ argocd_namespace }} get endpoints argocd-server -o wide"
+      register: ep_info
+      changed_when: false
+      failed_when: false
+
+    - name: Mostrar Endpoints de ArgoCD Server
+      ansible.builtin.debug:
+        var: ep_info.stdout_lines
+
+    - name: Agregar entrada en /etc/hosts del nodo controlplane
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "{{ node_ip.stdout }} {{ argocd_hostname }}"
+        state: present
+        regexp: ".*{{ argocd_hostname }}$"
+        backup: yes
+      become: true
+
+    - name: Verificar entrada en /etc/hosts del controlplane
+      ansible.builtin.shell: cat /etc/hosts | grep {{ argocd_hostname }}
+      register: hosts_check
+      changed_when: false
+
+    - name: Mostrar entrada en /etc/hosts
+      ansible.builtin.debug:
+        var: hosts_check.stdout
+
+    - name: Probar conectividad desde el controlplane
+      ansible.builtin.uri:
+        url: "https://{{ argocd_hostname }}"
+        method: GET
+        status_code: [200, 302, 307]
+        validate_certs: no
+        timeout: 10
+      register: remote_connectivity
+      failed_when: false
+      changed_when: false
+
+    - name: Mostrar resultado de conectividad remota
+      ansible.builtin.debug:
+        msg: "Conectividad desde controlplane: {{ remote_connectivity.status is defined | ternary('✓ OK (Status: ' + (remote_connectivity.status | string) + ')', '✗ FALLO') }}"
+
+    - name: Obtener contraseña inicial de ArgoCD
+      ansible.builtin.command: "microk8s kubectl -n {{ argocd_namespace }} get secret argocd-initial-admin-secret -o jsonpath='{.data.password}'"
+      register: argocd_password_b64
+      changed_when: false
+      failed_when: false
+
+    - name: Decodificar contraseña de ArgoCD
+      ansible.builtin.shell: echo "{{ argocd_password_b64.stdout }}" | base64 -d
+      register: argocd_password
+      changed_when: false
+      when: argocd_password_b64.rc == 0
+
+    - name: Instrucciones finales
+      ansible.builtin.debug:
+        msg:
+          - "═══════════════════════════════════════════════════════════════"
+          - "  Configuración del nodo completada"
+          - "═══════════════════════════════════════════════════════════════"
+          - ""
+          - "Ahora en TU MÁQUINA LOCAL, ejecuta este comando:"
+          - ""
+          - "  echo '{{ node_ip.stdout }} {{ argocd_hostname }}' | sudo tee -a /etc/hosts"
+          - ""
+          - "Luego abre tu navegador y accede a:"
+          - ""
+          - "  https://{{ argocd_hostname }}"
+          - ""
+          - "Credenciales:"
+          - "  Usuario: admin"
+          - "  Contraseña: {{ argocd_password.stdout | default('(ejecuta: microk8s kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath=\"{.data.password}\" | base64 -d)') }}"
+          - ""
+          - "Si no funciona, verifica:"
+          - "  1. Que el comando anterior se ejecutó en TU PC"
+          - "  2. Que los pods estén Running: microk8s kubectl -n {{ argocd_namespace }} get pods"
+          - "  3. Que el Ingress tenga ADDRESS configurada"
+          - "  4. Acepta el certificado autofirmado en el navegador"
+          - "═══════════════════════════════════════════════════════════════"

@@ -1,6 +1,6 @@
 ---
 - name: Instalar MicroK8s en Ubuntu/Debian
-  hosts: localhost
+  hosts: workers
   become: yes
   tasks:
 
